@@ -1,0 +1,12 @@
+streamlit
+oracledb
+google-generativeai
+pypdf
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-text-splitters
+langchain-classic
+python-dotenv
+langchain-oracledb>=1.2.0
+pydantic>=2.0.0
