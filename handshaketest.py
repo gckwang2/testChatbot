@@ -4,7 +4,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import OracleVS
 from langchain_classic.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 # --- 1. Sidebar & Model Selection ---
 st.set_page_config(page_title="Freddy's Resume AI", layout="centered")
