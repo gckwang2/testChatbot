@@ -1,19 +1,18 @@
 import asyncio
 from putergenai import PuterClient
 
-async def test_puter():
+async def check_auth():
     async with PuterClient() as client:
-        # Step 1: Login
-        await client.login("YOUR_USERNAME", "YOUR_PASSWORD")
-        print("✅ Login Successful")
-        
-        # Step 2: Simple Chat (No Vector Search)
-        print("⏳ Sending test chat...")
         try:
-            # Try a smaller model first to verify access
-            resp = await client.ai_chat("Hello", options={"model": "gpt-4o-mini"})
-            print(f"✅ Response received: {resp}")
+            # TRY THIS: Use only the username, no email format
+            await client.login("YOUR_EXACT_USERNAME", "YOUR_PASSWORD")
+            print("✅ Handshake successful!")
         except Exception as e:
-            print(f"❌ Chat failed: {e}")
+            print(f"❌ Handshake failed: {e}")
+            print("TIP: Ensure you aren't using an email address as the username.")
 
-asyncio.run(test_puter())
+# In Streamlit, use this to avoid the "loop already running" error:
+if __name__ == "__main__":
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(check_auth())
