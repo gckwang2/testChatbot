@@ -2,6 +2,7 @@ streamlit
 oracledb
 google-generativeai
 pypdf
+langchain
 langchain-core
 langchain-community
 langchain-google-genai
