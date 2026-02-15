@@ -3,8 +3,10 @@ import oracledb
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import OracleVS
 from langchain_openai import ChatOpenAI
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+
+# 2026 FIX: Import from langchain_classic instead of langchain
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
 # --- 1. App Configuration ---
@@ -28,7 +30,6 @@ with st.sidebar:
 @st.cache_resource
 def init_resources(model_id):
     try:
-        # Database & Vector Store Setup
         conn = oracledb.connect(
             user=st.secrets["DB_USER"],
             password=st.secrets["DB_PASSWORD"],
@@ -46,7 +47,6 @@ def init_resources(model_id):
             embedding_function=embeddings
         )
         
-        # OpenRouter LLM Bridge
         llm = ChatOpenAI(
             model=model_id,
             openai_api_key=st.secrets["OPENROUTER_API_KEY"],
@@ -62,24 +62,21 @@ v_store, llm = init_resources(selected_model_id)
 
 # --- 3. Chat Interface ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": f"Running on {model_choice}. How can I help with Freddy's resume?"}]
+    st.session_state.messages = [{"role": "assistant", "content": f"Ready! Using {model_choice}."}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- 4. RAG Logic (2026 Modern Chain) ---
+# --- 4. RAG Logic ---
 if prompt := st.chat_input("Ask about Freddy..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Fixed Syntax for ChatPromptTemplate
         system_prompt = (
-            "You are a professional recruiter. Use the following pieces of retrieved context "
-            "to answer the question about Freddy Goh. If you don't know, say so. "
-            "\n\n"
+            "You are a professional recruiter. Use the context to answer about Freddy Goh.\n\n"
             "Context: {context}"
         )
         
@@ -90,18 +87,14 @@ if prompt := st.chat_input("Ask about Freddy..."):
 
         with st.spinner(f"Querying {model_choice}..."):
             try:
-                # 1. Create the chain that handles document combination
                 combine_docs_chain = create_stuff_documents_chain(llm, prompt_template)
-                
-                # 2. Link it to the retriever
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
+                # Using the classic retrieval chain bridge
                 retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
                 
-                # 3. Get response
                 response = retrieval_chain.invoke({"input": prompt})
-                
                 ans = response["answer"]
                 st.markdown(ans)
                 st.session_state.messages.append({"role": "assistant", "content": ans})
             except Exception as e:
-                st.error(f"Chain Error: {e}")
+                st.error(f"Error: {e}")
