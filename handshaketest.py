@@ -95,3 +95,42 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
     # Add user message to state and display it
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        # YOUR SYSTEM PROMPT: Restore the expert Career Coach persona
+        template = """
+        SYSTEM: You are an expert Career Coach. Use the following context from Freddy Goh's resume 
+        to answer the user's question accurately.
+        
+        CONTEXT: {context}
+        QUESTION: {question}
+        
+        INSTRUCTIONS: Be professional and highlight Freddy's specific technical achievements. 
+        If information is missing, suggest related strengths Freddy has.
+        """
+        prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
+
+        with st.spinner(f"Querying {model_choice}..."):
+            try:
+                # Use the vector store as a retriever
+                retriever = v_store.as_retriever(search_kwargs={"k": 5})
+
+                # Setup the QA Chain with your custom prompt
+                chain = RetrievalQA.from_chain_type(
+                    llm=llm,
+                    chain_type="stuff",
+                    retriever=retriever,
+                    chain_type_kwargs={"prompt": prompt_template}
+                )
+                
+                # Execute search and generation
+                response = chain.invoke(prompt)
+                full_response = response["result"]
+                
+                # Display and save response
+                st.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
+            except Exception as e:
+                st.error(f"Search Error: {e}")
