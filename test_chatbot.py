@@ -1,6 +1,7 @@
 import streamlit as st
 import oracledb
 import asyncio
+import nest_asyncio
 from putergenai import PuterClient
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import OracleVS
@@ -16,7 +17,10 @@ try:
 except ImportError:
     from langchain.chains import RetrievalQA
 
-# --- 1. Custom Puter LLM Wrapper (Fixed for Streamlit) ---
+# Apply nest_asyncio to allow Puter's async calls to run within Streamlit
+nest_asyncio.apply()
+
+# --- 1. Custom Puter LLM Wrapper ---
 class PuterLLM(LLM):
     model_name: str = "gpt-4o" 
 
@@ -37,29 +41,19 @@ class PuterLLM(LLM):
                         options={"model": self.model_name}
                     )
                     
-                    # 2026 Parse: Check for different response types
+                    # 2026 Robust Parsing
                     if isinstance(result, dict):
-                        # Standard nested result
-                        if "response" in result:
-                            return result["response"]["result"]["message"]["content"]
-                        # Some versions return 'text' or 'message' directly
-                        return result.get("text", result.get("message", str(result)))
+                        # Attempt to find content in common nested paths
+                        res_obj = result.get("response", {}).get("result", {}).get("message", {})
+                        content = res_obj.get("content")
+                        if content:
+                            return content
+                        return str(result)
                     return str(result)
             except Exception as e:
                 return f"Puter Error: {str(e)}"
 
-        # Robust async handling for Streamlit's threaded environment
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        if loop.is_running():
-            # If already in a loop, we need to run this in a thread or separate context
-            import nest_asyncio
-            nest_asyncio.apply()
-            
+        # Run the async function in the current loop
         return asyncio.run(fetch_response())
 
 # --- 2. Database & App Initialization ---
@@ -84,7 +78,7 @@ def init_connections():
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # Puter LLM
+        # Puter LLM instance
         llm = PuterLLM()
         
         # Oracle Vector Store
@@ -103,7 +97,7 @@ v_store, llm, conn = init_connections()
 # --- 3. Chat Session State ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I can now search Freddy's resume using AI semantic matching. Ask me anything!"}
+        {"role": "assistant", "content": "Hello! I am ready to search Freddy's resume. How can I help you today?"}
     ]
 
 for message in st.session_state.messages:
@@ -117,7 +111,7 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # YOUR SPECIFIC PROMPT TEMPLATE
+        # Your specific Prompt Template logic
         template = """
         SYSTEM: Use the following context from Freddy's resume 
         to answer the user's question. If the answer isn't in the context, be honest but 
@@ -132,7 +126,7 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
 
         with st.spinner("Searching Freddy's experience..."):
             try:
-                # Set up the retriever (pure vector fallback as requested)
+                # Set up the retriever
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
 
                 # Create the QA Chain
