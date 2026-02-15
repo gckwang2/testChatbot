@@ -9,7 +9,7 @@ from langchain_community.vectorstores import OracleVS
 # Change these lines in your test_chatbot.py
 from langchain_core.prompts import PromptTemplate
 from langchain_classic.chains import RetrievalQA  # <--- Use langchain_classic here
-from langchain.llms.base import LLM
+from langchain_core.language_models.llms import LLM
 
 # 1. Define the specific prompt for the document answering
 system_prompt = (
