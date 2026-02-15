@@ -6,10 +6,10 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import OracleVS
 
 # UPDATED IMPORTS FOR 2026
+# Change these lines in your test_chatbot.py
 from langchain_core.prompts import PromptTemplate
-from langchain.chains import RetrievalQA
+from langchain_classic.chains import RetrievalQA  # <--- Use langchain_classic here
 from langchain.llms.base import LLM
-from typing import Any, List, Optional
 
 # --- 1. Custom Puter LLM Wrapper ---
 class PuterLLM(LLM):
