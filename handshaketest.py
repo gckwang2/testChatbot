@@ -3,7 +3,7 @@ import oracledb
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
-from langchain_community.vectorstores import OracleVS
+from langchain_oracledb import OracleVS 
 from langchain_classic.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 
@@ -19,7 +19,7 @@ def update_greeting():
         st.session_state.messages = [{"role": "assistant", "content": greeting}]
 
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 flagship search: Oracle Vector + RAG + GPT-OSS 120B")
+st.caption("2026 Search: Oracle 23ai TLS (Walletless) + HNSW Indexing")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -28,7 +28,7 @@ with st.sidebar:
         options=[
             "Gemini 3 Flash (Direct Google)", 
             "Gemini 2.5 Pro (Direct Google)", 
-            "GPT-OSS-120B (Direct Groq)",      # New Heavyweight Option
+            "GPT-OSS-120B (Direct Groq)",
             "Llama 3.3 70B (Direct Groq)", 
             "Qwen 3 32B (Direct Groq)", 
             "Llama 3.3 70B (OpenRouter Free)"
@@ -37,30 +37,30 @@ with st.sidebar:
         key="model_selector",
         on_change=update_greeting
     )
-    if any(m in model_choice for m in ["Pro", "Qwen", "OSS"]):
-        st.caption("✨ High-Reasoning mode active.")
 
-# --- 2. Connection Logic ---
+# --- 2. Connection Logic (Standard TLS) ---
 @st.cache_resource
 def init_connections(engine_choice):
     try:
+        # Using pure TLS (Thin Mode). DSN should be the TLS connection string.
+        # Example DSN format: (description= (retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1521)(host=adb.region.oraclecloud.com))(connect_data=(service_name=your_db_high.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))
         conn = oracledb.connect(
             user=st.secrets["DB_USER"],
             password=st.secrets["DB_PASSWORD"],
-            dsn=st.secrets["DB_DSN"]
+            dsn=st.secrets["DB_DSN"] # Ensure this is your TLS string from OCI
         )
+        
         embeddings = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # LLM Logic Mapping
+        # LLM Logic
         if engine_choice == "Gemini 3 Flash (Direct Google)":
             llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=st.secrets["GOOGLE_API_KEY"])
         elif engine_choice == "Gemini 2.5 Pro (Direct Google)":
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=st.secrets["GOOGLE_API_KEY"], thinking_budget=1024)
         elif engine_choice == "GPT-OSS-120B (Direct Groq)":
-            # The flagship open-weights model from OpenAI on Groq
             llm = ChatGroq(model="openai/gpt-oss-120b", groq_api_key=st.secrets["GROQ_API_KEY"])
         elif engine_choice == "Llama 3.3 70B (Direct Groq)":
             llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
@@ -94,17 +94,17 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
     with st.chat_message("assistant"):
         template = f"""
         SYSTEM: You are an Expert Career Coach representing Freddy Goh. 
-        You are currently using the {model_choice} engine.
+        Engine: {model_choice}.
         
         CONTEXT: {{context}}
         QUESTION: {{question}}
         
-        INSTRUCTIONS: Answer based on the resume context. Be professional and highlight technical wins.
+        INSTRUCTIONS: Answer professionally using the provided context.
         ANSWER:
         """
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
-        with st.spinner(f"Reasoning with {model_choice}..."):
+        with st.spinner(f"Searching via {model_choice}..."):
             try:
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
                 chain = RetrievalQA.from_chain_type(
