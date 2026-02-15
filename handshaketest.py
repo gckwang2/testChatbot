@@ -10,7 +10,7 @@ from langchain_core.prompts import PromptTemplate
 # --- 1. Sidebar & Model Selection ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("AI-enabled search powered by Oracle, RAG, and 2026 flagship LLMs.")
+st.caption("2026 flagship search: Oracle Vector + RAG + Multi-LLM Selection")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -20,13 +20,13 @@ with st.sidebar:
             "Gemini 3 Flash (Direct Google)", 
             "Gemini 2.5 Pro (Direct Google)", 
             "Llama 3.3 70B (Direct Groq)", 
-            "Qwen 3 32B (Direct Groq)",        # Updated Name
+            "Qwen 3 32B (Direct Groq)", 
             "Llama 3.3 70B (OpenRouter Free)"
         ],
         index=0
     )
     if "Pro" in model_choice or "Qwen" in model_choice:
-        st.caption("✨ Deep reasoning mode active.")
+        st.caption("✨ Reasoning Mode: Enabled")
 
 # --- 2. Connection Logic ---
 @st.cache_resource
@@ -44,39 +44,18 @@ def init_connections(engine_choice):
         )
         
         if engine_choice == "Gemini 3 Flash (Direct Google)":
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-3-flash-preview", 
-                google_api_key=st.secrets["GOOGLE_API_KEY"]
-            )
+            llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=st.secrets["GOOGLE_API_KEY"])
         elif engine_choice == "Gemini 2.5 Pro (Direct Google)":
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro", 
-                google_api_key=st.secrets["GOOGLE_API_KEY"],
-                thinking_budget=1024 
-            )
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=st.secrets["GOOGLE_API_KEY"], thinking_budget=1024)
         elif engine_choice == "Llama 3.3 70B (Direct Groq)":
-            llm = ChatGroq(
-                model="llama-3.3-70b-versatile",
-                groq_api_key=st.secrets["GROQ_API_KEY"]
-            )
+            llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
         elif engine_choice == "Qwen 3 32B (Direct Groq)":
-            # UPDATED: Using the new stable 2026 ID
-            llm = ChatGroq(
-                model="qwen/qwen3-32b", 
-                groq_api_key=st.secrets["GROQ_API_KEY"]
-            )
+            # Using the official 2026 stable ID
+            llm = ChatGroq(model="qwen/qwen3-32b", groq_api_key=st.secrets["GROQ_API_KEY"])
         else:
-            llm = ChatOpenAI(
-                model="meta-llama/llama-3.3-70b-instruct:free",
-                openai_api_key=st.secrets["OPENROUTER_API_KEY"],
-                openai_api_base="https://openrouter.ai/api/v1"
-            )
+            llm = ChatOpenAI(model="meta-llama/llama-3.3-70b-instruct:free", openai_api_key=st.secrets["OPENROUTER_API_KEY"], openai_api_base="https://openrouter.ai/api/v1")
 
-        v_store = OracleVS(
-            client=conn,
-            table_name="RESUME_SEARCH", 
-            embedding_function=embeddings
-        )
+        v_store = OracleVS(client=conn, table_name="RESUME_SEARCH", embedding_function=embeddings)
         return v_store, llm
     except Exception as e:
         st.error(f"❌ Connection Failed: {e}")
@@ -86,55 +65,48 @@ v_store, llm = init_connections(model_choice)
 
 # --- 3. Chat Session State ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": f"Hello! Ready to chat using {model_choice}."}
-    ]
+    st.session_state.messages = [{"role": "assistant", "content": f"I am now using {model_choice}. How can I help?"}]
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 4. Chat Input & Retrieval Logic ---
+# --- 4. Retrieval & Prompt Loop ---
 if prompt := st.chat_input("Ask about Freddy's experience..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # REFINED PROMPT: Forcing the "Expert Career Coach" persona
-        template = """
-        You are an Expert Career Coach representing Freddy Goh. 
-        Use the following pieces of context from his professional profile to answer the question.
+        # This block now runs EVERY time a message is sent, 
+        # ensuring it picks up the latest model_choice from the sidebar.
         
-        CONTEXT: {context}
+        template = f"""
+        SYSTEM: You are an Expert Career Coach representing Freddy Goh. 
+        You are currently operating via the {model_choice} engine.
         
-        QUESTION: {question}
+        CONTEXT: {{context}}
+        QUESTION: {{question}}
         
-        If the context doesn't have the answer, use your knowledge of the tech industry 
-        to explain how Freddy's stated skills would apply. Be enthusiastic!
-        
-        ANSWER:
+        INSTRUCTIONS: Use the context above to highlight Freddy's achievements. 
+        If specific data is missing, suggest how his known skills (AI, Oracle, Python) apply.
         """
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
-        with st.spinner(f"Analysing via {model_choice}..."):
+        with st.spinner(f"Processing with {model_choice}..."):
             try:
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
-                
-                # We use chain_type_kwargs to pass the prompt into the underlying LLMChain
                 chain = RetrievalQA.from_chain_type(
                     llm=llm,
                     chain_type="stuff",
                     retriever=retriever,
-                    return_source_documents=False,
                     chain_type_kwargs={"prompt": prompt_template}
                 )
                 
-                response = chain.invoke({"query": prompt}) # Changed to standard query dict
+                response = chain.invoke({"query": prompt})
                 full_response = response["result"]
                 
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
             except Exception as e:
-                st.error(f"Model Error: {e}")
+                st.error(f"Model Processing Error: {e}")
