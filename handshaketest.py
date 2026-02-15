@@ -10,7 +10,7 @@ from langchain_core.prompts import PromptTemplate
 # --- 1. Sidebar & Model Selection ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("AI-enabled search powered by Oracle, RAG, and multi-model LLM support.")
+st.caption("AI-enabled search powered by Oracle, RAG, and 2026 flagship LLMs.")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -20,13 +20,13 @@ with st.sidebar:
             "Gemini 3 Flash (Direct Google)", 
             "Gemini 2.5 Pro (Direct Google)", 
             "Llama 3.3 70B (Direct Groq)", 
-            "Qwen 3 32B (Direct Groq)",        # New Qwen Option
+            "Qwen 3 32B (Direct Groq)",        # Updated Name
             "Llama 3.3 70B (OpenRouter Free)"
         ],
         index=0
     )
-    if "2.5 Pro" in model_choice or "Qwen" in model_choice:
-        st.caption("✨ Using Reasoning/Thinking Mode.")
+    if "Pro" in model_choice or "Qwen" in model_choice:
+        st.caption("✨ Deep reasoning mode active.")
 
 # --- 2. Connection Logic ---
 @st.cache_resource
@@ -43,7 +43,6 @@ def init_connections(engine_choice):
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # LLM Logic for 5 Options
         if engine_choice == "Gemini 3 Flash (Direct Google)":
             llm = ChatGoogleGenerativeAI(
                 model="gemini-3-flash-preview", 
@@ -61,9 +60,9 @@ def init_connections(engine_choice):
                 groq_api_key=st.secrets["GROQ_API_KEY"]
             )
         elif engine_choice == "Qwen 3 32B (Direct Groq)":
-            # Using the latest Qwen Reasoning model on Groq
+            # UPDATED: Using the new stable 2026 ID
             llm = ChatGroq(
-                model="qwen-qwq-32b", 
+                model="qwen/qwen3-32b", 
                 groq_api_key=st.secrets["GROQ_API_KEY"]
             )
         else:
@@ -99,32 +98,43 @@ for message in st.session_state.messages:
 if prompt := st.chat_input("Ask about Freddy's experience..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # FIXED: Indented block starts here
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
+        # REFINED PROMPT: Forcing the "Expert Career Coach" persona
         template = """
-        SYSTEM: Expert Career Coach persona.
+        You are an Expert Career Coach representing Freddy Goh. 
+        Use the following pieces of context from his professional profile to answer the question.
+        
         CONTEXT: {context}
+        
         QUESTION: {question}
+        
+        If the context doesn't have the answer, use your knowledge of the tech industry 
+        to explain how Freddy's stated skills would apply. Be enthusiastic!
+        
+        ANSWER:
         """
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
         with st.spinner(f"Analysing via {model_choice}..."):
             try:
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
+                
+                # We use chain_type_kwargs to pass the prompt into the underlying LLMChain
                 chain = RetrievalQA.from_chain_type(
                     llm=llm,
                     chain_type="stuff",
                     retriever=retriever,
+                    return_source_documents=False,
                     chain_type_kwargs={"prompt": prompt_template}
                 )
                 
-                response = chain.invoke(prompt)
+                response = chain.invoke({"query": prompt}) # Changed to standard query dict
                 full_response = response["result"]
                 
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
             except Exception as e:
-                st.error(f"Search Error: {e}")
+                st.error(f"Model Error: {e}")
