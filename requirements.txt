@@ -6,6 +6,7 @@ langchain-community
 langchain-google-genai
 langchain-core
 langchain-classic
+langchain-groq
 putergenai
 langchain-oracledb>=1.2.0
 pydantic>=2.0.0
