@@ -10,8 +10,6 @@ from langchain_core.prompts import PromptTemplate
 # --- 1. Sidebar & Model Selection ---
 # --- 1.1 Page Config ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
-
-st.title("🤖 Freddy's AI Career Assistant")
 st.caption("AI enable search powered by Oracle keyword+vector, RAG, Google embedding, Gemini flash 3.0 LLM, Llama 3.3 70B")
 
 with st.sidebar:
