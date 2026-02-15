@@ -11,13 +11,13 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.language_models.llms import LLM
 from typing import Any, List, Optional
 
-# Using langchain_classic to maintain compatibility with your RetrievalQA structure
+# Using langchain_classic for your RetrievalQA structure
 try:
     from langchain_classic.chains import RetrievalQA
 except ImportError:
     from langchain.chains import RetrievalQA
 
-# Apply nest_asyncio to allow Puter's async calls to run within Streamlit
+# Allow nested event loops for Puter's async calls
 nest_asyncio.apply()
 
 # --- 1. Custom Puter LLM Wrapper ---
@@ -32,29 +32,44 @@ class PuterLLM(LLM):
         async def fetch_response():
             try:
                 async with PuterClient() as client:
-                    # Logs into Puter using secrets
+                    # Logs into Puter
                     await client.login(st.secrets["PUTER_USER"], st.secrets["PUTER_PASS"])
                     
-                    # Request generation from Puter
+                    # Request generation
                     result = await client.ai_chat(
                         prompt=prompt, 
                         options={"model": self.model_name}
                     )
                     
-                    # 2026 Robust Parsing
+                    # Log raw result to Streamlit console for debugging
+                    print(f"DEBUG: Puter Raw Result Type: {type(result)}")
+                    
+                    # 2026 Parsing Logic
                     if isinstance(result, dict):
-                        # Attempt to find content in common nested paths
-                        res_obj = result.get("response", {}).get("result", {}).get("message", {})
-                        content = res_obj.get("content")
+                        # Drill down into the likely response structure
+                        res_data = result.get("response", {}).get("result", {})
+                        message = res_data.get("message", {})
+                        content = message.get("content")
+                        
                         if content:
                             return content
-                        return str(result)
+                        # Fallback for alternative dictionary structures
+                        return str(result.get("text", result))
                     return str(result)
             except Exception as e:
-                return f"Puter Error: {str(e)}"
+                return f"Puter Error during fetch: {str(e)}"
 
-        # Run the async function in the current loop
-        return asyncio.run(fetch_response())
+        # Safer async execution for Streamlit
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, use a task
+                return loop.run_until_complete(fetch_response())
+            else:
+                return asyncio.run(fetch_response())
+        except Exception as e:
+            # Final fallback
+            return f"Async execution error: {str(e)}"
 
 # --- 2. Database & App Initialization ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
@@ -72,16 +87,13 @@ def init_connections():
         conn = get_db_connection()
         conn.ping()
         
-        # Google Embeddings
         embeddings = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # Puter LLM instance
         llm = PuterLLM()
         
-        # Oracle Vector Store
         v_store = OracleVS(
             client=conn,
             table_name="RESUME_SEARCH", 
@@ -97,7 +109,7 @@ v_store, llm, conn = init_connections()
 # --- 3. Chat Session State ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I am ready to search Freddy's resume. How can I help you today?"}
+        {"role": "assistant", "content": "Hello! I am ready to search Freddy's resume using Puter.js. Ask me anything!"}
     ]
 
 for message in st.session_state.messages:
@@ -111,7 +123,6 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Your specific Prompt Template logic
         template = """
         SYSTEM: Use the following context from Freddy's resume 
         to answer the user's question. If the answer isn't in the context, be honest but 
@@ -124,12 +135,10 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
         """
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
-        with st.spinner("Searching Freddy's experience..."):
+        with st.spinner("Searching Freddy's experience via Puter.js..."):
             try:
-                # Set up the retriever
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
 
-                # Create the QA Chain
                 chain = RetrievalQA.from_chain_type(
                     llm=llm,
                     chain_type="stuff",
@@ -137,8 +146,7 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
                     chain_type_kwargs={"prompt": prompt_template}
                 )
                 
-                # Execute search
-                # RetrievalQA with custom prompt expects 'query' key
+                # Execute search (Passing query as dictionary)
                 response = chain.invoke({"query": prompt})
                 full_response = response["result"]
                 
@@ -147,4 +155,3 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
                 
             except Exception as e:
                 st.error(f"Search Error: {e}")
-                st.info("Check if the table RESUME_SEARCH contains data and valid vectors.")
