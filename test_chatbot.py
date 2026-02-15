@@ -1,20 +1,19 @@
 import streamlit as st
 import oracledb
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.vectorstores import OracleVS
-from langchain.prompts import PromptTemplate
-from langchain.chains import RetrievalQA
+from langchain_oracledb import OracleVS
+from langchain_core.prompts import PromptTemplate
+from langchain_classic.chains import RetrievalQA
 
 # --- 1. Page Config ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("AI enabled search powered by Oracle keyword+vector, RAG, Google embedding, Gemini Flash LLM")
+st.caption("AI enable search powered by Oracle keyword+vector, RAG, Google embedding, Gemini flash 3.0 LLM ")
 
 # --- 2. Connections ---
 @st.cache_resource
 def get_db_connection():
-    # Using thin mode for Oracle DB is usually easier in Streamlit Cloud
     return oracledb.connect(
         user=st.secrets["DB_USER"],
         password=st.secrets["DB_PASSWORD"],
@@ -24,21 +23,21 @@ def get_db_connection():
 def init_connections():
     try:
         conn = get_db_connection()
+        conn.ping()
         
         # Embeddings Model
         embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001", 
+            model="models/gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # Chat Model - Using standard production naming
+        # Chat Model
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-pro", 
-            google_api_key=st.secrets["GOOGLE_API_KEY"],
-            temperature=0.7 # Recommended for a balance of creativity and accuracy
+                    model="gemini-2.5-pro", 
+                    google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
-        
-        # Vector Store
+                
+        # Vector Store (The Fallback Engine)
         v_store = OracleVS(
             client=conn,
             table_name="RESUME_SEARCH", 
@@ -68,6 +67,7 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
+        # Define the Prompt Template
         template = """
         SYSTEM: Use the following context from Freddy's resume 
         to answer the user's question. If the answer isn't in the context, be honest but 
@@ -76,15 +76,15 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
         CONTEXT: {context}
         QUESTION: {question}
         
-        INSTRUCTIONS: Summarize Freddy's experience, technical skills, and achievements clearly.
+        INSTRUCTIONS: Summarize Freddy's experience, specific technical skills, and key achievements.
         """
-        prompt_template = PromptTemplate(
-            template=template, 
-            input_variables=["context", "question"]
-        )
+        prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
         with st.spinner("Searching Freddy's experience..."):
             try:
+                # 🟢 THE PURE VECTOR FALLBACK:
+                # Instead of the Hybrid Retriever (which failed on the index type),
+                # we use the vector store itself to find the most similar content.
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
 
                 chain = RetrievalQA.from_chain_type(
@@ -95,8 +95,7 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
                 )
                 
                 # Execute search and generation
-                # RetrievalQA usually maps the input to 'query'
-                response = chain.invoke({"query": prompt})
+                response = chain.invoke(prompt)
                 full_response = response["result"]
                 
                 st.markdown(full_response)
@@ -104,4 +103,4 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
                 
             except Exception as e:
                 st.error(f"Search Error: {e}")
-                st.info("Check if RESUME_SEARCH has data and your GOOGLE_API_KEY is valid.")
+                st.info("Check if the table RESUME_SEARCH contains data and valid vectors.")
