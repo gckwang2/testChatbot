@@ -46,7 +46,7 @@ def init_resources(model_id):
             embedding_function=embeddings
         )
         
-        # OpenRouter LLM (Using ChatOpenAI as the bridge)
+        # OpenRouter LLM Bridge
         llm = ChatOpenAI(
             model=model_id,
             openai_api_key=st.secrets["OPENROUTER_API_KEY"],
@@ -75,13 +75,33 @@ if prompt := st.chat_input("Ask about Freddy..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # 2026 Standard: Using ChatPromptTemplate
+        # Fixed Syntax for ChatPromptTemplate
         system_prompt = (
             "You are a professional recruiter. Use the following pieces of retrieved context "
             "to answer the question about Freddy Goh. If you don't know, say so. "
             "\n\n"
-            "{context}"
+            "Context: {context}"
         )
         
         prompt_template = ChatPromptTemplate.from_messages([
-            ("system", system_prompt
+            ("system", system_prompt),
+            ("human", "{input}"),
+        ])
+
+        with st.spinner(f"Querying {model_choice}..."):
+            try:
+                # 1. Create the chain that handles document combination
+                combine_docs_chain = create_stuff_documents_chain(llm, prompt_template)
+                
+                # 2. Link it to the retriever
+                retriever = v_store.as_retriever(search_kwargs={"k": 5})
+                retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
+                
+                # 3. Get response
+                response = retrieval_chain.invoke({"input": prompt})
+                
+                ans = response["answer"]
+                st.markdown(ans)
+                st.session_state.messages.append({"role": "assistant", "content": ans})
+            except Exception as e:
+                st.error(f"Chain Error: {e}")
