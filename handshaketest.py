@@ -8,9 +8,9 @@ from langchain_classic.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
 
 # --- 1. Sidebar & Model Selection ---
-# --- 1.1 Page Config ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
-st.caption("AI enable search powered by Oracle keyword+vector, RAG, Google embedding, Gemini flash 3.0 LLM, Llama 3.3 70B")
+st.title("🤖 Freddy's AI Career Assistant")
+st.caption("AI-enabled search powered by Oracle keyword+vector, RAG, Google embedding, Gemini & Llama LLMs")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -18,13 +18,12 @@ with st.sidebar:
         "Select AI Engine:",
         options=[
             "Gemini 3 Flash (Direct Google)", 
-            "Gemini 2.5 Pro (Direct Google)",  # New Option
+            "Gemini 2.5 Pro (Direct Google)", 
             "Llama 3.3 70B (Direct Groq)", 
             "Llama 3.3 70B (OpenRouter Free)"
         ],
         index=0
     )
-    # 2026 Tip: Gemini 2.5 Pro includes a "Thinking" budget
     if "2.5 Pro" in model_choice:
         st.caption("✨ Using Thinking Mode for deep reasoning.")
 
@@ -43,18 +42,16 @@ def init_connections(engine_choice):
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # LLM Logic
         if engine_choice == "Gemini 3 Flash (Direct Google)":
             llm = ChatGoogleGenerativeAI(
                 model="gemini-3-flash-preview", 
                 google_api_key=st.secrets["GOOGLE_API_KEY"]
             )
         elif engine_choice == "Gemini 2.5 Pro (Direct Google)":
-            # Direct Google setup for the Thinking Model
             llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-pro", 
                 google_api_key=st.secrets["GOOGLE_API_KEY"],
-                thinking_budget=1024  # Activates the "Thinking" reasoning steps
+                thinking_budget=1024 
             )
         elif engine_choice == "Llama 3.3 70B (Direct Groq)":
             llm = ChatGroq(
@@ -81,5 +78,20 @@ def init_connections(engine_choice):
 
 v_store, llm = init_connections(model_choice)
 
-# --- 3. Chat Session State & UI (Remaining code stays the same) ---
-# ... [rest of the chat logic] ...
+# --- 3. Chat Session State ---
+# This ensures the chat history stays on screen during reruns
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": f"Hello! I am ready to help you explore Freddy's skills using {model_choice}."}
+    ]
+
+# Display existing chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# --- 4. Chat Input & Retrieval Logic ---
+if prompt := st.chat_input("Ask about Freddy's experience..."):
+    # Add user message to state and display it
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
