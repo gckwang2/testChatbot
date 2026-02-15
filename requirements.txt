@@ -1,6 +1,7 @@
 streamlit
 oracledb
 langchain
+langchain-openai
 langchain-community
 langchain-google-genai
 langchain-core
