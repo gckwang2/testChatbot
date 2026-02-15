@@ -4,7 +4,9 @@ import asyncio
 from putergenai import PuterClient
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import OracleVS
-from langchain.prompts import PromptTemplate
+
+# UPDATED IMPORTS FOR 2026
+from langchain_core.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 from langchain.llms.base import LLM
 from typing import Any, List, Optional
