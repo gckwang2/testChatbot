@@ -10,3 +10,4 @@ langchain-oracledb>=1.2.0
 pydantic>=2.0.0
 python-dotenv
 pypdf
+nest-asyncio
