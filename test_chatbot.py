@@ -1,17 +1,39 @@
 import streamlit as st
 import oracledb
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_oracledb import OracleVS
-from langchain_core.prompts import PromptTemplate
-from langchain_classic.chains import RetrievalQA
+import asyncio
+from putergenai import PuterClient
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import OracleVS
+from langchain.prompts import PromptTemplate
+from langchain.chains import RetrievalQA
+from langchain.llms.base import LLM
+from typing import Any, List, Optional
 
-# --- 1. Page Config ---
+# --- 1. Custom Puter LLM Wrapper for LangChain ---
+class PuterLLM(LLM):
+    model_name: str = "gpt-5.2" # You can use gpt-4o, gpt-5-nano, etc.
+
+    @property
+    def _llm_type(self) -> str:
+        return "puter"
+
+    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+        async def get_puter_res():
+            # Use credentials from st.secrets
+            async with PuterClient() as client:
+                await client.login(st.secrets["PUTER_USER"], st.secrets["PUTER_PASS"])
+                result = await client.ai_chat(
+                    prompt=prompt, 
+                    options={"model": self.model_name}
+                )
+                return result["response"]["result"]["message"]["content"]
+        return asyncio.run(get_puter_res())
+
+# --- 2. Page Config ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
+st.title("🤖 Freddy's AI Career Assistant (Puter Edition)")
 
-st.title("🤖 Freddy's AI Career Assistant")
-st.caption("AI enable search powered by Oracle keyword+vector, RAG, Google embedding, Gemini flash 3.0 LLM ")
-
-# --- 2. Connections ---
+# --- 3. Connections ---
 @st.cache_resource
 def get_db_connection():
     return oracledb.connect(
@@ -23,70 +45,46 @@ def get_db_connection():
 def init_connections():
     try:
         conn = get_db_connection()
-        conn.ping()
-        
-        # Embeddings Model
         embeddings = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # Chat Model
-        llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-pro", 
-                    google_api_key=st.secrets["GOOGLE_API_KEY"]
-        )
-                
-        # Vector Store (The Fallback Engine)
+        # Initialize Puter LLM instead of Gemini
+        llm = PuterLLM(model_name="gpt-5.2")
+        
         v_store = OracleVS(
             client=conn,
             table_name="RESUME_SEARCH", 
             embedding_function=embeddings
         )
-        return v_store, llm, conn
+        return v_store, llm
     except Exception as e:
         st.error(f"❌ Connection Failed: {e}")
         st.stop()
 
-v_store, llm, conn = init_connections()
+v_store, llm = init_connections()
 
-# --- 3. Chat Session State ---
+# --- 4. Chat UI & Logic ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I can now search Freddy's resume using AI semantic matching. Ask me anything!"}
-    ]
+    st.session_state.messages = [{"role": "assistant", "content": "Hello! I'm now powered by Puter.js (GPT-5.2). Ask about Freddy's skills!"}]
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# --- 4. Chat Input & Retrieval Logic ---
-if prompt := st.chat_input("Ask about Freddy's skills..."):
+if prompt := st.chat_input("Ask about Freddy..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # Define the Prompt Template
-        template = """
-        SYSTEM: Use the following context from Freddy's resume 
-        to answer the user's question. If the answer isn't in the context, be honest but 
-        highlight related strengths Freddy has.
-        
-        CONTEXT: {context}
-        QUESTION: {question}
-        
-        INSTRUCTIONS: Summarize Freddy's experience, specific technical skills, and key achievements.
-        """
+        template = "CONTEXT: {context}\nQUESTION: {question}\nINSTRUCTIONS: Answer using Freddy's resume."
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
-        with st.spinner("Searching Freddy's experience..."):
+        with st.spinner("Puter is thinking..."):
             try:
-                # 🟢 THE PURE VECTOR FALLBACK:
-                # Instead of the Hybrid Retriever (which failed on the index type),
-                # we use the vector store itself to find the most similar content.
                 retriever = v_store.as_retriever(search_kwargs={"k": 5})
-
                 chain = RetrievalQA.from_chain_type(
                     llm=llm,
                     chain_type="stuff",
@@ -94,13 +92,8 @@ if prompt := st.chat_input("Ask about Freddy's skills..."):
                     chain_type_kwargs={"prompt": prompt_template}
                 )
                 
-                # Execute search and generation
-                response = chain.invoke(prompt)
-                full_response = response["result"]
-                
-                st.markdown(full_response)
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-                
+                response = chain.invoke({"query": prompt})
+                st.markdown(response["result"])
+                st.session_state.messages.append({"role": "assistant", "content": response["result"]})
             except Exception as e:
-                st.error(f"Search Error: {e}")
-                st.info("Check if the table RESUME_SEARCH contains data and valid vectors.")
+                st.error(f"Error: {e}")
