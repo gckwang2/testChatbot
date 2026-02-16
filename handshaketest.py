@@ -1,138 +1,110 @@
+import warnings
+warnings.filterwarnings("ignore", message="Core Pydantic V1 functionality isn't compatible")
+
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
-from langchain_milvus import Milvus 
-from langchain_core.messages import AIMessage
+from langchain_milvus import Milvus
+from langchain_core.prompts import PromptTemplate
+from langchain_classic.chains import RetrievalQA
 
-# --- 1. UI Setup ---
+# --- 1. Page Config ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 
-# Initialize Chat History first to ensure "Other Party" renders immediately
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I am Freddy's AI Career Assistant. Ask me about his expertise in LangChain, RAG, 5G, or Technical Leadership."}
-    ]
-
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 Engine: Zilliz Cloud Hybrid Search (Keyword + Semantic)")
+st.caption("Enhanced Semantic RAG | Zilliz Cloud | Gemini 3.0 Flash Preview")
 
-# --- 2. Connection Logic ---
+# --- 2. Connections ---
 @st.cache_resource
-def init_connections(engine_choice):
+def init_connections():
     try:
         embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001", 
+            model="gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # Model Selection
-        if "Qwen" in engine_choice:
-            llm = ChatOpenAI(model="qwen3-max-2026-01-23", openai_api_key=st.secrets["QWEN_API_KEY"], openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
-        elif "Gemini" in engine_choice:
-            llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro", google_api_key=st.secrets["GOOGLE_API_KEY"])
-        else:
-            target_model = "mixtral-8x7b-32768" if "120B" in engine_choice else "llama-3.3-70b-versatile"
-            llm = ChatGroq(model=target_model, groq_api_key=st.secrets["GROQ_API_KEY"])
-
-        # Milvus/Zilliz Store
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-3-flash-preview", 
+            google_api_key=st.secrets["GOOGLE_API_KEY"]
+        )
+        
         v_store = Milvus(
             embedding_function=embeddings,
-            collection_name="RESUME_SEARCH",
             connection_args={
                 "uri": st.secrets["ZILLIZ_URI"],
                 "token": st.secrets["ZILLIZ_TOKEN"],
-                "secure": True,
-                "pool_size": 5,
-                "client_config": {"wait_for_ready": True}
-            }
+                "secure": True
+            },
+            collection_name="RESUME_SEARCH"
         )
         return v_store, llm
     except Exception as e:
-        return None, str(e)
+        st.error(f"❌ Connection Failed: {e}")
+        st.stop()
 
-# --- 3. Sidebar Configuration ---
-with st.sidebar:
-    st.header("Engine Settings")
-    available_models = [
-        "Gemini 3 Flash (Direct Google)", 
-        "Gemini 2.5 Pro (Direct Google)", 
-        "Qwen 3 Max Thinking (Alibaba)",
-        "GPT-OSS-120B (Direct Groq)",
-        "Groq Compound (Router Model)",
-        "Llama 3.3 70B (Direct Groq)"
+v_store, llm = init_connections()
+
+# --- 3. Chat Session State ---
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hello! I'm Freddy's AI career assistant. How can I help you explore his 23 years of expertise today?"}
     ]
-    model_choice = st.selectbox("Select AI Engine:", options=available_models, key="model_v5")
-    
-    v_store, llm_or_err = init_connections(model_choice)
-    
-    if v_store is None:
-        st.error(f"Offline: {llm_or_err}")
-    else:
-        st.success("Connected: Zilliz Cloud")
-    
-    if st.button("Clear Chat History"):
-        st.session_state.messages = [{"role": "assistant", "content": "Chat reset. How can I help?"}]
-        st.rerun()
 
-# --- 4. Render Chat History ---
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# --- 5. Main Interaction Logic ---
-if prompt := st.chat_input("Ask about Freddy's AI experience"):
+# --- 4. Chat Input & Optimized Logic ---
+if prompt := st.chat_input("Ask about Freddy's skills..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        if v_store is None:
-            st.error("Database connection failed. Check secrets.")
-        else:
-            with st.spinner("Hybrid Search: Filtering for keywords & intent..."):
-                try:
-                    # 🟢 KEYWORD DETECTION OPTIMIZATION
-                    # Define words that MUST trigger exact matches
-                    critical_terms = ["LangChain", "RAG", "Python", "5G", "Chatbot", "Oracle", "Zilliz"]
-                    detected = [t for t in critical_terms if t.lower() in prompt.lower()]
-                    
-                    filter_expr = None
-                    if detected:
-                        # Tells Milvus to look specifically for these keywords in the text field
-                        filter_expr = " or ".join([f"text LIKE '%{t}%'" for t in detected])
+        # 🟢 KEYWORD DETECTION (Non-filtering)
+        # We detect these to tell the LLM to prioritize them, but we DON'T filter the database with them.
+        critical_keywords = ["LangChain", "RAG", "Python", "5G", "Robotics", "Oracle", "Zilliz", "Chatbot"]
+        detected = [k for k in critical_keywords if k.lower() in prompt.lower()]
+        
+        # Build the dynamic instruction
+        detection_hint = f"Note: The user is specifically asking about {', '.join(detected)}." if detected else ""
 
-                    # Step 1: Attempt Hybrid Search
-                    docs = v_store.similarity_search(prompt, k=5, expr=filter_expr)
-                    
-                    # Step 2: Fallback if keyword filter was too restrictive
-                    if not docs:
-                        docs = v_store.similarity_search(prompt, k=5)
+        template = f"""
+        SYSTEM: You are a professional recruiter and Freddy's Career Advocate. 
+        {detection_hint}
+        
+        INSTRUCTIONS: 
+        1. Answer strictly based on the provided context.
+        2. If keywords like {detected} are mentioned in the question, find every specific mention of them in the context.
+        3. If information is missing, state that clearly but suggest related strengths in AI or Cloud.
+        4. Maintain a professional, executive tone.
 
-                    # Prepare Context
-                    context_text = "\n\n".join([f"Source: {d.metadata.get('file_name', 'Doc')}\n{d.page_content}" for d in docs])
-                    
-                    # LLM Prompt
-                    system_msg = f"""
-                    SYSTEM: You are Freddy's Career Advocate. Answer based ONLY on the evidence.
-                    KEYWORDS DETECTED: {', '.join(detected) if detected else 'None'}
-                    
-                    CONTEXT FROM DATABASE:
-                    {context_text}
-                    
-                    QUESTION: {prompt}
-                    """
+        CONTEXT: {{context}}
+        QUESTION: {{question}}
+        """
+        
+        prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
-                    # Invoke & Robust Clean
-                    raw_res = llm_or_err.invoke(system_msg)
-                    if hasattr(raw_res, 'content'):
-                        txt = raw_res.content
-                        clean_text = "".join([p['text'] for p in txt if 'text' in p]) if isinstance(txt, list) else str(txt)
-                    else:
-                        clean_text = str(raw_res)
+        with st.spinner("Retrieving evidence from Zilliz..."):
+            try:
+                # We use pure semantic retrieval (k=7 for a wider net)
+                retriever = v_store.as_retriever(search_kwargs={"k": 7})
 
-                    st.markdown(clean_text)
-                    st.session_state.messages.append({"role": "assistant", "content": clean_text})
-
-                except Exception as e:
-                    st.error(f"Search failed: {e}")
+                chain = RetrievalQA.from_chain_type(
+                    llm=llm,
+                    chain_type="stuff",
+                    retriever=retriever,
+                    chain_type_kwargs={"prompt": prompt_template}
+                )
+                
+                response = chain.invoke({"query": prompt})
+                full_response = response["result"]
+                
+                # Robust Cleaner for Gemini 3.0 content blocks
+                if isinstance(full_response, list):
+                    full_response = "".join([p.get('text', '') for p in full_response])
+                
+                st.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
+            except Exception as e:
+                st.error(f"Search Error: {e}")
