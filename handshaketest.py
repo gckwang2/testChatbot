@@ -97,4 +97,42 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # --- 4. Retrieval & Prompt Loop ---
-if prompt := st.chat_input
+if prompt := st.chat_input("Ask about Freddy's experience..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        template = """
+        SYSTEM: You are Freddy's Career Assistant.
+        CONTEXT: {context}
+        QUESTION: {question}
+        INSTRUCTIONS: If a keyword is present in the context, emphasize it.
+        ANSWER:
+        """
+        prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
+
+        with st.spinner("Searching Hybrid Index..."):
+            try:
+                # Use the dedicated Hybrid Retriever
+                retriever = OracleHybridSearchRetriever(
+                    client=conn,
+                    vector_store=v_store,
+                    search_mode="hybrid",
+                    k=5,
+                    params={"alpha": hybrid_alpha} # Dynamic balance between keyword and vector
+                )
+
+                chain = RetrievalQA.from_chain_type(
+                    llm=llm,
+                    chain_type="stuff",
+                    retriever=retriever,
+                    chain_type_kwargs={"prompt": prompt_template}
+                )
+                
+                response = chain.invoke({"query": prompt})
+                full_response = response["result"]
+                st.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+            except Exception as e:
+                st.error(f"Search Error: {e}")
