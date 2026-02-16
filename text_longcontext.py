@@ -41,6 +41,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+
 # --- 5. THE LONG-CONTEXT INFERENCE ---
 if prompt := st.chat_input("Query Freddy's consolidated history..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -49,21 +50,32 @@ if prompt := st.chat_input("Query Freddy's consolidated history..."):
 
     with st.chat_message("assistant"):
         with st.spinner("Searching full context..."):
-            # The "Long Context Stuffing" method
             system_prompt = f"""
             ROLE: You are Freddy Goh's Senior Career Advocate.
             FULL CAREER DATA:
             {full_context}
             
             USER QUESTION: {prompt}
-            
-            INSTRUCTION: Use the entire context above to answer. 
-            Be specific, reference dates/projects, and be persuasive.
             """
             
-            # Simple text extraction logic to avoid metadata errors
-            response = llm.invoke(system_prompt)
-            answer = response.content if hasattr(response, 'content') else str(response)
+            # --- THE KEY UPDATE IS HERE ---
+            raw_response = llm.invoke(system_prompt)
             
+            # 1. Check if the response has a 'content' attribute (LangChain style)
+            if hasattr(raw_response, 'content'):
+                content = raw_response.content
+            else:
+                content = raw_response
+
+            # 2. Extract text if it's trapped in a list/dictionary (Gemini 3 format)
+            if isinstance(content, list) and len(content) > 0:
+                # Look for the 'text' key inside the first dictionary
+                answer = content[0].get('text', str(content[0]))
+            elif isinstance(content, dict):
+                answer = content.get('text', str(content))
+            else:
+                answer = str(content)
+            
+            # Render the clean answer
             st.markdown(answer)
             st.session_state.messages.append({"role": "assistant", "content": answer})
