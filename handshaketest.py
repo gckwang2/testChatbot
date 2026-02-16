@@ -114,4 +114,24 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
                     search_mode="hybrid",
                     k=5,
                     params={
-                        "text": {"
+                        "text": {"score_weight": t_weight},
+                        "vector": {"score_weight": v_weight}
+                    }
+                )
+
+                chain = RetrievalQA.from_chain_type(
+                    llm=llm,
+                    chain_type="stuff",
+                    retriever=retriever,
+                    chain_type_kwargs={"prompt": prompt_template}
+                )
+                
+                response = chain.invoke({"query": prompt})
+                st.markdown(response["result"])
+                st.session_state.messages.append({"role": "assistant", "content": response["result"]})
+            except Exception as e:
+                st.error(f"Search Error: {e}")
+                st.info("Falling back to standard semantic search...")
+                fallback_chain = RetrievalQA.from_chain_type(llm=llm, retriever=v_store.as_retriever())
+                res = fallback_chain.invoke({"query": prompt})
+                st.markdown(res["result"])
