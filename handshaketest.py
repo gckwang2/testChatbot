@@ -63,6 +63,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # --- 5. Main Interaction Logic (With Score Tracking) ---
+# --- 5. Main Interaction Logic (Optimized for 15 Chunks & Reasoning) ---
 if prompt := st.chat_input("Ask about Freddy's experience"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -72,28 +73,41 @@ if prompt := st.chat_input("Ask about Freddy's experience"):
         if v_store is None:
             st.error("Database offline.")
         else:
-            with st.spinner("Searching and calculating similarity scores..."):
+            with st.spinner("Analyzing 15 data points for evidence..."):
                 try:
-                    # 🟢 THE CHANGE: Use similarity_search_with_score
-                    # This returns a list of tuples: (Document, Score)
+                    # 🟢 Using k=15 for deeper retrieval
                     docs_with_scores = v_store.similarity_search_with_score(prompt, k=15)
 
                     context_entries = []
                     score_debug = []
 
-                    for doc, score in docs_with_scores:
+                    for i, (doc, score) in enumerate(docs_with_scores):
                         source_name = doc.metadata.get('file_name', 'Resume')
-                        # Round score to 4 decimal places for readability
                         rounded_score = round(float(score), 4)
                         
-                        context_entries.append(f"SOURCE: {source_name} (Similarity: {rounded_score})\nCONTENT: {doc.page_content}")
-                        score_debug.append(f"- {source_name}: {rounded_score}")
+                        # We label them by Rank to help the LLM understand priority
+                        context_entries.append(f"RANK {i+1} | SOURCE: {source_name}\nCONTENT: {doc.page_content}")
+                        score_debug.append(f"{i+1}. {source_name}: {rounded_score}")
 
                     context_text = "\n\n---\n\n".join(context_entries)
                     
-                    system_msg = f"SYSTEM: Answer using this context.\n\nCONTEXT:\n{context_text}\n\nQUESTION: {prompt}"
+                    # 🟢 OPTIMIZED PROMPT: Encouraging "Advocacy" instead of just "Extraction"
+                    system_msg = f"""
+                    SYSTEM: You are Freddy's Career Advocate. Your goal is to connect his experience to the user's needs.
+                    
+                    INSTRUCTIONS:
+                    1. If a specific tool (like AWS) isn't explicitly named, but related expertise (like Cloud Architecture, Virtualization, or RTX) is present, explain that connection.
+                    2. Look through all 15 context blocks. If you find even a partial match, highlight it.
+                    3. If there is absolutely no mention, explain what Freddy *does* have that is closest to the request.
+                    4. Keep the tone professional but persuasive.
 
-                    # Invoke Model
+                    CONTEXT:
+                    {context_text}
+                    
+                    QUESTION: {prompt}
+                    """
+
+                    # Invoke Model (Gemini 3 Flash handles this large context easily)
                     raw_res = llm_or_err.invoke(system_msg)
                     
                     # Clean Response
@@ -103,12 +117,12 @@ if prompt := st.chat_input("Ask about Freddy's experience"):
                     else:
                         clean_text = str(raw_res)
 
-                    # 🟢 Append Score Data to the bottom of the answer
-                    score_footer = "\n\n**Search Accuracy (Top 5 Matches):**\n" + "\n".join(score_debug)
+                    # Output
+                    score_footer = "\n\n**Search Accuracy (Top 15 Matches):**\n" + "\n".join(score_debug)
                     final_answer = clean_text + score_footer
 
                     st.markdown(final_answer)
                     st.session_state.messages.append({"role": "assistant", "content": final_answer})
 
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Search failed: {e}")
