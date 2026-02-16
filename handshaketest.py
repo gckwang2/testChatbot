@@ -105,14 +105,47 @@ if prompt := st.chat_input("Ask about Freddy's AI experience"):
             # 2. Invoke LLM
             raw_response = llm.invoke(system_prompt)
             
-            # 3. 🟢 THE CLEANER (Extracting readable text only)
-            if isinstance(raw_response.content, str):
-                clean_text = raw_response.content
-            elif isinstance(raw_response.content, list):
-                clean_text = "".join([part['text'] for part in raw_response.content if 'text' in part])
-            else:
-                clean_text = str(raw_response.content)
+# --- 3. Chat Interaction ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-            # 4. Final Output
-            st.markdown(clean_text)
-            st.session_state.messages.append({"role": "assistant", "content": clean_text})
+# Display previous messages
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Main Chat Input
+if prompt := st.chat_input("Ask about Freddy's AI experience"):
+    # 1. Display and Save User Message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # 2. Generate and Display Assistant Response
+    with st.chat_message("assistant"):
+        with st.spinner(f"Querying {model_choice}..."):
+            try:
+                # Retrieval
+                docs = v_store.similarity_search(prompt, k=5)
+                context = "\n\n".join([f"Source: {d.metadata.get('file_name', 'Doc')}\n{d.page_content}" for d in docs])
+                
+                system_prompt = f"Answer based on this context:\n{context}\n\nQuestion: {prompt}"
+                
+                # Invoke LLM
+                response = llm.invoke(system_prompt)
+                
+                # Clean the response content
+                if isinstance(response.content, str):
+                    clean_text = response.content
+                elif isinstance(response.content, list):
+                    clean_text = "".join([part['text'] for part in response.content if 'text' in part])
+                else:
+                    clean_text = str(response.content)
+
+                # 3. Final Output and Save
+                st.markdown(clean_text)
+                st.session_state.messages.append({"role": "assistant", "content": clean_text})
+                
+            except Exception as e:
+                error_msg = f"❌ Error generating response: {str(e)}"
+                st.error(error_msg)
