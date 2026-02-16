@@ -19,7 +19,7 @@ def update_greeting():
         st.session_state.messages = [{"role": "assistant", "content": greeting}]
 
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 Engine: Oracle 23ai Hybrid Search (Vector + Keyword)")
+st.caption("2026 Engine: Oracle 23ai Hybrid Search (Fixed Validation)")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -42,7 +42,7 @@ with st.sidebar:
     )
     
     st.divider()
-    hybrid_alpha = st.slider("Search Balance (Alpha)", 0.0, 1.0, 0.5, help="0.0 = Pure Keyword, 1.0 = Pure Vector")
+    hybrid_alpha = st.slider("Search Balance (Alpha)", 0.0, 1.0, 0.5, help="0.0 = Keyword-heavy, 1.0 = Vector-heavy")
 
 # --- 2. Connection Logic ---
 @st.cache_resource
@@ -74,19 +74,20 @@ def init_connections(engine_choice):
 
         v_store = OracleVS(client=conn, table_name="RESUME_SEARCH", embedding_function=embeddings)
         
-        # --- HYBRID SEARCH OPTIMIZATION ---
-        # Ensure a Hybrid Vector Index exists for exact keyword matches
+        # Define the specific index name to be used by the retriever later
+        HYBRID_INDEX_NAME = "hybrid_idx_resume"
         try:
-            v_store.create_hybrid_index(idx_name="hybrid_idx_resume")
+            v_store.create_hybrid_index(idx_name=HYBRID_INDEX_NAME)
         except Exception:
             pass # Index likely already exists
             
-        return conn, v_store, llm
+        return conn, v_store, llm, HYBRID_INDEX_NAME
     except Exception as e:
         st.error(f"❌ Connection Failed: {e}")
         st.stop()
 
-conn, v_store, llm = init_connections(model_choice)
+# Unpack the fixed index name
+conn, v_store, llm, HYBRID_INDEX_NAME = init_connections(model_choice)
 
 # --- 3. Chat Session State ---
 if "messages" not in st.session_state:
@@ -107,20 +108,20 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
         SYSTEM: You are Freddy's Career Assistant.
         CONTEXT: {context}
         QUESTION: {question}
-        INSTRUCTIONS: If a keyword is present in the context, emphasize it.
         ANSWER:
         """
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
         with st.spinner("Searching Hybrid Index..."):
             try:
-                # Use the dedicated Hybrid Retriever
+                # FIXED: Added the required 'idx_name' field
                 retriever = OracleHybridSearchRetriever(
                     client=conn,
                     vector_store=v_store,
+                    idx_name=HYBRID_INDEX_NAME, # Explicitly required field
                     search_mode="hybrid",
                     k=5,
-                    params={"alpha": hybrid_alpha} # Dynamic balance between keyword and vector
+                    params={"alpha": hybrid_alpha}
                 )
 
                 chain = RetrievalQA.from_chain_type(
