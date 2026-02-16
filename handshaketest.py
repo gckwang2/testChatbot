@@ -5,18 +5,32 @@ from langchain_openai import ChatOpenAI
 from langchain_milvus import Milvus 
 from langchain_core.messages import AIMessage
 
-# --- 1. UI Setup ---
+# --- 1. UI & Page Setup ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I am Freddy's AI Career Assistant. Ask me anything, and I will now show you the similarity scores for my sources!"}
+        {"role": "assistant", "content": "Hello! I am Freddy's Agentic Career Advocate. I don't just search; I research his 23-year career to find the best match for your needs."}
     ]
 
-st.title("🤖 Freddy's AI Career Assistant")
-st.caption("Engine: Zilliz Cloud | Score Tracking Enabled")
+st.title("🤖 Freddy's Agentic Career Assistant")
+st.caption("2026 Engine: Multi-Step Research & Synthesis (Agentic RAG)")
 
-# --- 2. Connection Logic ---
+# --- 2. THE CLEANER: Handles Gemini/Groq dictionary outputs ---
+def extract_clean_text(response):
+    if hasattr(response, 'content'):
+        content = response.content
+    else:
+        content = response
+
+    if isinstance(content, list):
+        if len(content) > 0 and isinstance(content[0], dict):
+            return content[0].get('text', str(content[0]))
+        return " ".join([str(i) for i in content])
+    
+    return str(content)
+
+# --- 3. Multi-Model Connection Logic ---
 @st.cache_resource
 def init_connections(engine_choice):
     try:
@@ -46,83 +60,81 @@ def init_connections(engine_choice):
     except Exception as e:
         return None, str(e)
 
-# --- 3. Sidebar ---
+# --- 4. Sidebar Engine Selection ---
 with st.sidebar:
     st.header("Engine Settings")
-    available_models = ["Gemini 3 Flash (Direct Google)", "Gemini 2.5 Pro (Direct Google)", "Qwen 3 Max Thinking (Alibaba)", "GPT-OSS-120B (Direct Groq)", "Llama 3.3 70B (Direct Groq)"]
+    available_models = [
+        "Gemini 3 Flash (Direct Google)", 
+        "Gemini 2.5 Pro (Direct Google)", 
+        "Qwen 3 Max Thinking (Alibaba)",
+        "Llama 3.3 70B (Direct Groq)"
+    ]
     model_choice = st.selectbox("Select AI Engine:", options=available_models)
-    v_store, llm_or_err = init_connections(model_choice)
+    v_store, llm = init_connections(model_choice)
     
-    if st.button("Clear Chat"):
-        st.session_state.messages = [{"role": "assistant", "content": "Chat reset."}]
+    if v_store:
+        st.success("Connected to Zilliz")
+    
+    if st.button("Clear History"):
+        st.session_state.messages = [{"role": "assistant", "content": "Research reset. How can I help?"}]
         st.rerun()
 
-# --- 4. Render History ---
+# --- 5. Display History ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- 5. Main Interaction Logic (With Score Tracking) ---
-# --- 5. Main Interaction Logic (Optimized for 15 Chunks & Reasoning) ---
-if prompt := st.chat_input("Ask about Freddy's experience"):
+# --- 6. The Agentic Logic ---
+if prompt := st.chat_input("Ask about Freddy's potential..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        if v_store is None:
-            st.error("Database offline.")
+        if not v_store:
+            st.error("Database Connection Failed.")
         else:
-            with st.spinner("Analyzing 15 data points for evidence..."):
-                try:
-                    # 🟢 Using k=15 for deeper retrieval
-                    docs_with_scores = v_store.similarity_search_with_score(prompt, k=15)
+            # --- PHASE 1: Agent Research Plan ---
+            planning_prompt = f"Identify 3 distinct technical search queries to evaluate: '{prompt}'. Output queries only, one per line."
+            
+            with st.spinner("🧠 Agent is planning research..."):
+                plan_res = llm.invoke(planning_prompt)
+                clean_plan = extract_clean_text(plan_res)
+                search_topics = [t.strip() for t in clean_plan.split("\n") if t.strip() and not t.startswith('-')][:3]
 
-                    context_entries = []
-                    score_debug = []
+            # --- PHASE 2: Execution (Multi-Query Tool Use) ---
+            accumulated_context = []
+            # We use k=5 per query (Total 15 chunks)
+            retriever = v_store.as_retriever(search_kwargs={"k": 5})
+            
+            for topic in search_topics:
+                with st.spinner(f"🔍 Searching for: {topic}..."):
+                    docs = retriever.invoke(topic)
+                    accumulated_context.extend([d.page_content for d in docs])
 
-                    for i, (doc, score) in enumerate(docs_with_scores):
-                        source_name = doc.metadata.get('file_name', 'Resume')
-                        rounded_score = round(float(score), 4)
-                        
-                        # We label them by Rank to help the LLM understand priority
-                        context_entries.append(f"RANK {i+1} | SOURCE: {source_name}\nCONTENT: {doc.page_content}")
-                        score_debug.append(f"{i+1}. {source_name}: {rounded_score}")
+            # --- PHASE 3: Synthesis & Advocacy ---
+            # Remove duplicates from context
+            context_str = "\n\n".join(list(set(accumulated_context)))
+            
+            final_agent_prompt = f"""
+            ROLE: You are Freddy Goh's Professional Career Advocate. 
+            
+            CONTEXT:
+            {context_str}
+            
+            USER QUESTION: {prompt}
+            
+            TASK:
+            1. Analyze the context for direct evidence AND transferable skills.
+            2. Since Freddy has 23+ years of experience, if a specific tool isn't listed, infer expertise based on related cloud/infrastructure seniority.
+            3. Provide a professional, persuasive response focusing on business impact and leadership.
+            4. Do not include JSON, metadata, or technical signatures.
+            5. Do not explicitly state your role title in the response.
+            """
 
-                    context_text = "\n\n---\n\n".join(context_entries)
-                    
-                    # 🟢 OPTIMIZED PROMPT: Encouraging "Advocacy" instead of just "Extraction"
-                    system_msg = f"""
-                    SYSTEM: You are Freddy's Career Advocate. Your goal is to connect his experience to the user's needs.
-                    
-                    INSTRUCTIONS:
-                    1. If a specific tool (like AWS) isn't explicitly named, but related expertise (like Cloud Architecture, Virtualization, or RTX) is present, explain that connection.
-                    2. Look through all 15 context blocks. If you find even a partial match, highlight it.
-                    3. If there is absolutely no mention, explain what Freddy *does* have that is closest to the request.
-                    4. Keep the tone professional but persuasive.
-
-                    CONTEXT:
-                    {context_text}
-                    
-                    QUESTION: {prompt}
-                    """
-
-                    # Invoke Model (Gemini 3 Flash handles this large context easily)
-                    raw_res = llm_or_err.invoke(system_msg)
-                    
-                    # Clean Response
-                    if hasattr(raw_res, 'content'):
-                        txt = raw_res.content
-                        clean_text = "".join([p['text'] for p in txt if 'text' in p]) if isinstance(txt, list) else str(txt)
-                    else:
-                        clean_text = str(raw_res)
-
-                    # Output
-                    score_footer = "\n\n**Search Accuracy (Top 15 Matches):**\n" + "\n".join(score_debug)
-                    final_answer = clean_text + score_footer
-
-                    st.markdown(final_answer)
-                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
-
-                except Exception as e:
-                    st.error(f"Search failed: {e}")
+            with st.spinner("⚖️ Synthesizing recommendation..."):
+                final_res = llm.invoke(final_agent_prompt)
+                answer = extract_clean_text(final_res)
+                
+                st.markdown(answer)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
