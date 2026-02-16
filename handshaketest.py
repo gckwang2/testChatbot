@@ -18,7 +18,6 @@ def init_connections(engine_choice):
         google_api_key=st.secrets["GOOGLE_API_KEY"]
     )
     
-    # Model Selection Logic
     if "Qwen" in engine_choice:
         llm = ChatOpenAI(model="qwen3-max-2026-01-23", openai_api_key=st.secrets["QWEN_API_KEY"], openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
     elif "Gemini" in engine_choice:
@@ -26,7 +25,6 @@ def init_connections(engine_choice):
     else:
         llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
 
-    # Milvus Connection
     v_store = Milvus(
         embedding_function=embeddings,
         collection_name="RESUME_SEARCH",
@@ -40,8 +38,11 @@ def init_connections(engine_choice):
     )
     return v_store, llm
 
-# Initialize based on sidebar selection (omitted sidebar code for brevity)
-v_store, llm = init_connections(st.sidebar.selectbox("Model", ["Gemini 3 Flash (Direct Google)", "Llama 3.3 70B (Direct Groq)"]))
+# Sidebar is required here to avoid the "selectbox" name error
+with st.sidebar:
+    model_choice = st.selectbox("Model", ["Gemini 3 Flash (Direct Google)", "Llama 3.3 70B (Direct Groq)"])
+
+v_store, llm = init_connections(model_choice)
 
 # --- 3. Chat Interaction ---
 if "messages" not in st.session_state:
@@ -56,18 +57,26 @@ if prompt := st.chat_input("Ask about Freddy's AI experience"):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # --- Find this section in your script ---
     with st.chat_message("assistant"):
-        with st.spinner("Retrieving project evidence..."):
-            docs = get_targeted_context(prompt, v_store, conn)
+        with st.spinner("Searching Freddy's Cloud Database..."):
+            # 1. Retrieval
+            docs = v_store.similarity_search(prompt, k=5)
+            context = "\n\n".join([f"Source: {d.metadata.get('file_name')}\n{d.page_content}" for d in docs])
             
-            # ... (formatting context code) ...
+            system_prompt = f"Answer based on this context:\n{context}\n\nQuestion: {prompt}"
             
-            # 🟢 THE UPDATED PART:
-            response = llm.invoke(system_prompt)
+            # 2. Invoke LLM
+            raw_response = llm.invoke(system_prompt)
             
-            # We only want the TEXT, not the signatures or extras
-            clean_answer = response.content 
-    
-            st.markdown(clean_answer)
-            st.session_state.messages.append({"role": "assistant", "content": clean_answer})
+            # 3. 🟢 THE ROBUST CLEANER: Extracting string from complex objects
+            if isinstance(raw_response.content, str):
+                clean_text = raw_response.content
+            elif isinstance(raw_response.content, list):
+                # Handles cases where content is a list of dicts like [{'type': 'text', 'text': '...'}]
+                clean_text = "".join([part['text'] for part in raw_response.content if 'text' in part])
+            else:
+                clean_text = str(raw_response.content)
+
+            # 4. Final Output
+            st.markdown(clean_text)
+            st.session_state.messages.append({"role": "assistant", "content": clean_text})
