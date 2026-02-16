@@ -12,7 +12,7 @@ st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 # We do this before connections to ensure the "Other Party" exists immediately
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I am Freddy's AI Career Assistant. Ask me anything about his technical expertise or 23-year career journey."}
+        {"role": "assistant", "content": "Hello! I am Freddy's AI Career Assistant. Ask me anything about his career journey."}
     ]
 
 st.title("🤖 Freddy's AI Career Assistant")
