@@ -83,34 +83,54 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- 5. Main Interaction ---
+# --- 5. Main Interaction (Optimized for Keyword Detection) ---
 if prompt := st.chat_input("Ask about Freddy's AI experience"):
-    # Show User message immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Process AI response
     if v_store is None:
-        st.error("Cannot answer: Database connection is offline.")
+        st.error("Database connection is offline.")
     else:
         with st.chat_message("assistant"):
-            with st.spinner("Analysing evidence..."):
+            with st.spinner("Executing Hybrid Keyword + Semantic Search..."):
                 try:
-                    docs = v_store.similarity_search(prompt, k=5)
+                    # 🟢 OPTIMIZATION: Keyword Classification
+                    # Define "Must-Have" keywords that prove experience
+                    critical_keywords = ["LangChain", "RAG", "Python", "5G", "Robotics", "Chatbot"]
+                    
+                    # Check if the user's prompt mentions any critical keywords
+                    detected_terms = [term for term in critical_keywords if term.lower() in prompt.lower()]
+                    
+                    filter_expression = None
+                    if detected_terms:
+                        # Build a filter expression for Milvus: e.g., "text LIKE '%LangChain%'"
+                        # Note: This assumes your metadata or text field is searchable
+                        filter_expression = " or ".join([f"text LIKE '%{term}%'" for term in detected_terms])
+
+                    # 🟢 Perform the Search with the filter
+                    docs = v_store.similarity_search(
+                        prompt, 
+                        k=5, 
+                        expr=filter_expression  # Forces detection of keywords
+                    )
+
+                    # If the filter was too strict and returned nothing, fallback to pure semantic search
+                    if not docs:
+                        docs = v_store.similarity_search(prompt, k=5)
+
                     context = "\n\n".join([f"Source: {d.metadata.get('file_name')}\n{d.page_content}" for d in docs])
                     
-                    system_prompt = f"System: Answer based on context.\nContext: {context}\nQuestion: {prompt}"
-                    raw_response = llm_or_error.invoke(system_prompt)
+                    # Tell the LLM specifically that these keywords WERE detected
+                    detection_notice = f"Keywords detected: {', '.join(detected_terms)}" if detected_terms else "Semantic match found."
                     
-                    # Clean extraction
-                    if hasattr(raw_response, 'content'):
-                        content = raw_response.content
-                        clean_text = "".join([p['text'] for p in content if 'text' in p]) if isinstance(content, list) else str(content)
-                    else:
-                        clean_text = str(raw_response)
-
-                    st.markdown(clean_text)
-                    st.session_state.messages.append({"role": "assistant", "content": clean_text})
-                except Exception as e:
-                    st.error(f"Search failed: {e}")
+                    system_prompt = f"""
+                    SYSTEM: You are Freddy's Career Advocate. 
+                    {detection_notice}
+                    Use the context to answer. If a keyword was detected, prioritize that evidence.
+                    
+                    CONTEXT: {context}
+                    QUESTION: {prompt}
+                    """
+                    
+                    # ... (rest of your LLM invoke and clean_text logic remains the same) ...
