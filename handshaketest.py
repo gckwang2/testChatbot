@@ -75,11 +75,11 @@ def init_connections(engine_choice):
 with st.sidebar:
     st.header("Engine Settings")
     available_models = [
+        "Gemini 3 Flash (Google)", 
+        "Gemini 2.5 Pro (Google)", 
         "Groq Compound (Router)",
         "GPT-OSS-120B (Groq)",
         "Llama 4 Scout 17B 16E (Groq)",
-        "Gemini 3 Flash (Google)", 
-        "Gemini 2.5 Pro (Google)", 
         "Qwen 3 Max Thinking (Alibaba)"
     ]
     model_choice = st.selectbox("Select AI Engine:", options=available_models)
@@ -140,7 +140,8 @@ if prompt := st.chat_input("Ask about Freddy's potential..."):
             1. Analyze the context for direct evidence and transferable skills.
             2. Given Freddy's 23+ years of experience, infer expertise for related technologies.
             3. Professional, persuasive response focusing on leadership and business impact.
-            4. No JSON, no technical signatures, and do not mention your role title.
+            4. If a skill isn't explicitly listed, infer the related skills found in the resume,and use his previous experience based on his senior level. Do not return "Career Advocate" in the return response.
+            5. No JSON, no technical signatures, and do not mention your role title.
             """
 
             with st.spinner("⚖️ Synthesizing recommendation..."):
