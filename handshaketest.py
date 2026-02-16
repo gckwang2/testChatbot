@@ -124,7 +124,7 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
 
         with st.spinner(f"Thinking with {model_choice}..."):
             try:
-                retriever = v_store.as_retriever(search_kwargs={"k": 5})
+                retriever = v_store.as_retriever(search_kwargs={"k": 15})
                 chain = RetrievalQA.from_chain_type(
                     llm=llm,
                     chain_type="stuff",
