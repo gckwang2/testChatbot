@@ -19,7 +19,7 @@ def init_connections(engine_choice):
         google_api_key=st.secrets["GOOGLE_API_KEY"]
     )
     
-    # --- MODEL ROUTING LOGIC ---
+    # --- MODEL ROUTING ---
     if "Qwen" in engine_choice:
         llm = ChatOpenAI(
             model="qwen3-max-2026-01-23", 
@@ -32,6 +32,7 @@ def init_connections(engine_choice):
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
     elif any(x in engine_choice for x in ["GPT-OSS", "Groq", "Llama"]):
+        # Model IDs for Groq
         if "120B" in engine_choice:
             target_model = "mixtral-8x7b-32768" 
         else:
@@ -80,21 +81,28 @@ v_store, llm = init_connections(model_choice)
 
 # --- 4. Chat Interaction Loop ---
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # 🟢 Immediate greeting so the "other party" is visible on load
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hello! I am Freddy's AI Career Assistant. Ask me about his expertise in 5G, AI Chatbots, or Technical Leadership."}
+    ]
 
+# Render chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# User Input
 if prompt := st.chat_input("Ask about Freddy's AI experience"):
+    # Display user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Generate Assistant response
     with st.chat_message("assistant"):
-        with st.spinner(f"Analysing Freddy's data via {model_choice}..."):
+        with st.spinner(f"Querying {model_choice}..."):
             try:
-                # 🟢 PROPERLY INDENTED BLOCK BELOW
+                # A. Retrieval from Zilliz
                 docs = v_store.similarity_search(prompt, k=5)
                 context_blocks = []
                 for d in docs:
@@ -104,10 +112,13 @@ if prompt := st.chat_input("Ask about Freddy's AI experience"):
                 
                 context = "\n\n---\n\n".join(context_blocks)
                 
-                system_prompt = f"System: Use the context to answer.\nContext: {context}\nQuestion: {prompt}"
+                # B. Prompt Engineering
+                system_prompt = f"System: Answer based on context.\nContext: {context}\nQuestion: {prompt}"
+                
+                # C. LLM Invocation
                 raw_response = llm.invoke(system_prompt)
                 
-                # Robust Content Extraction
+                # D. 🟢 CLEANER: Extracts readable text and avoids unreadable signatures
                 if hasattr(raw_response, 'content'):
                     content = raw_response.content
                     if isinstance(content, list):
@@ -117,6 +128,7 @@ if prompt := st.chat_input("Ask about Freddy's AI experience"):
                 else:
                     clean_text = str(raw_response)
 
+                # E. Final Display and Storage
                 st.markdown(clean_text)
                 st.session_state.messages.append({"role": "assistant", "content": clean_text})
             
