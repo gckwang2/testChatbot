@@ -19,7 +19,7 @@ def update_greeting():
         st.session_state.messages = [{"role": "assistant", "content": greeting}]
 
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 Engine: Oracle 23ai + Qwen 3 Max Thinking")
+st.caption("2026 Engine: Oracle 23ai Hybrid Search (Protocol Fix)")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -42,10 +42,10 @@ with st.sidebar:
     )
     
     st.divider()
-    # Fixed weights for Oracle search parameters
-    st.write("🔧 **Search Weighting**")
-    text_w = st.slider("Keyword Weight", 0.1, 2.0, 1.0, 0.1)
-    vector_w = st.slider("Semantic Weight", 0.1, 2.0, 1.0, 0.1)
+    st.write("🔧 **Hybrid Weights**")
+    # Oracle weights usually perform best between 0 and 1
+    t_weight = st.slider("Keyword (Text) Weight", 0.0, 1.0, 0.5, 0.05)
+    v_weight = st.slider("Semantic (Vector) Weight", 0.0, 1.0, 0.5, 0.05)
 
 # --- 2. Connection Logic ---
 @st.cache_resource
@@ -78,11 +78,6 @@ def init_connections(engine_choice):
         v_store = OracleVS(client=conn, table_name="RESUME_SEARCH", embedding_function=embeddings)
         
         HYBRID_INDEX_NAME = "hybrid_idx_resume"
-        try:
-            v_store.create_hybrid_index(idx_name=HYBRID_INDEX_NAME)
-        except Exception:
-            pass 
-            
         return conn, v_store, llm, HYBRID_INDEX_NAME
     except Exception as e:
         st.error(f"❌ Connection Failed: {e}")
@@ -113,9 +108,10 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
         """
         prompt_template = PromptTemplate(template=template, input_variables=["context", "question"])
 
-        with st.spinner("Searching Hybrid Index..."):
+        with st.spinner("Executing Hybrid Search..."):
             try:
-                # FIXED: Removed 'alpha' and used Oracle-native weight parameters
+                # FIXED: Structural change to params to match Oracle 23ai/26ai requirements
+                # The 'text' and 'vector' keys are mandatory sub-objects for weights.
                 retriever = OracleHybridSearchRetriever(
                     client=conn,
                     vector_store=v_store,
@@ -123,8 +119,8 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
                     search_mode="hybrid",
                     k=5,
                     params={
-                        "text_weight": text_w,
-                        "vector_weight": vector_w
+                        "text": {"score_weight": t_weight},
+                        "vector": {"score_weight": v_weight}
                     }
                 )
 
@@ -140,11 +136,11 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
             except Exception as e:
-                # If error persists, fallback to standard vector search
-                st.warning(f"Hybrid search adjustment needed: {e}")
-                st.info("Falling back to semantic-only search...")
+                st.error(f"Hybrid Engine Error: {e}")
+                st.info("Attempting automatic fallback to standard Vector Search...")
                 
-                standard_retriever = v_store.as_retriever(search_kwargs={"k": 5})
-                chain = RetrievalQA.from_chain_type(llm=llm, retriever=standard_retriever)
-                response = chain.invoke({"query": prompt})
-                st.markdown(response["result"])
+                # Dynamic Fallback: Ensures the user always gets an answer
+                fallback_retriever = v_store.as_retriever(search_kwargs={"k": 5})
+                fallback_chain = RetrievalQA.from_chain_type(llm=llm, retriever=fallback_retriever)
+                res = fallback_chain.invoke({"query": prompt})
+                st.markdown(res["result"])
