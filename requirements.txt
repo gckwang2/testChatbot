@@ -13,3 +13,6 @@ pydantic>=2.0.0
 python-dotenv
 pypdf
 nest-asyncio
+# Vector Database (Milvus/Zilliz)
+langchain-milvus
+pymilvus>=2.4.0
