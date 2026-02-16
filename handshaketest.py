@@ -31,14 +31,11 @@ def init_connections(engine_choice):
             model="gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
-    elif "GPT-OSS-120B" in engine_choice or "Groq" in engine_choice or "Llama" in engine_choice:
-        # Assigning specific model IDs for Groq
+    elif any(x in engine_choice for x in ["GPT-OSS", "Groq", "Llama"]):
         if "120B" in engine_choice:
             target_model = "mixtral-8x7b-32768" 
-        elif "Llama 3.3" in engine_choice:
-            target_model = "llama-3.3-70b-versatile"
         else:
-            target_model = "llama-3.3-70b-versatile" # Default Groq choice
+            target_model = "llama-3.3-70b-versatile"
             
         llm = ChatGroq(
             model=target_model, 
@@ -79,27 +76,49 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
 
-# Initialize the connections
 v_store, llm = init_connections(model_choice)
 
 # --- 4. Chat Interaction Loop ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Render existing chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Main Chat Input UI
 if prompt := st.chat_input("Ask about Freddy's AI experience"):
-    # Display user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate Assistant response
     with st.chat_message("assistant"):
         with st.spinner(f"Analysing Freddy's data via {model_choice}..."):
             try:
-                # A. Retrieval from
+                # 🟢 PROPERLY INDENTED BLOCK BELOW
+                docs = v_store.similarity_search(prompt, k=5)
+                context_blocks = []
+                for d in docs:
+                    fname = d.metadata.get('file_name', 'Document')
+                    page = d.metadata.get('page', 'N/A')
+                    context_blocks.append(f"Source: {fname} (Pg {page})\nContent: {d.page_content}")
+                
+                context = "\n\n---\n\n".join(context_blocks)
+                
+                system_prompt = f"System: Use the context to answer.\nContext: {context}\nQuestion: {prompt}"
+                raw_response = llm.invoke(system_prompt)
+                
+                # Robust Content Extraction
+                if hasattr(raw_response, 'content'):
+                    content = raw_response.content
+                    if isinstance(content, list):
+                        clean_text = "".join([part['text'] for part in content if 'text' in part])
+                    else:
+                        clean_text = str(content)
+                else:
+                    clean_text = str(raw_response)
+
+                st.markdown(clean_text)
+                st.session_state.messages.append({"role": "assistant", "content": clean_text})
+            
+            except Exception as e:
+                st.error(f"❌ Error during search: {str(e)}")
