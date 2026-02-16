@@ -19,7 +19,7 @@ def update_greeting():
         st.session_state.messages = [{"role": "assistant", "content": greeting}]
 
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 Engine: Oracle 23ai Hybrid Search (Fixed Validation)")
+st.caption("2026 Engine: Oracle 23ai + Qwen 3 Max Thinking")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -42,7 +42,10 @@ with st.sidebar:
     )
     
     st.divider()
-    hybrid_alpha = st.slider("Search Balance (Alpha)", 0.0, 1.0, 0.5, help="0.0 = Keyword-heavy, 1.0 = Vector-heavy")
+    # Fixed weights for Oracle search parameters
+    st.write("🔧 **Search Weighting**")
+    text_w = st.slider("Keyword Weight", 0.1, 2.0, 1.0, 0.1)
+    vector_w = st.slider("Semantic Weight", 0.1, 2.0, 1.0, 0.1)
 
 # --- 2. Connection Logic ---
 @st.cache_resource
@@ -74,19 +77,17 @@ def init_connections(engine_choice):
 
         v_store = OracleVS(client=conn, table_name="RESUME_SEARCH", embedding_function=embeddings)
         
-        # Define the specific index name to be used by the retriever later
         HYBRID_INDEX_NAME = "hybrid_idx_resume"
         try:
             v_store.create_hybrid_index(idx_name=HYBRID_INDEX_NAME)
         except Exception:
-            pass # Index likely already exists
+            pass 
             
         return conn, v_store, llm, HYBRID_INDEX_NAME
     except Exception as e:
         st.error(f"❌ Connection Failed: {e}")
         st.stop()
 
-# Unpack the fixed index name
 conn, v_store, llm, HYBRID_INDEX_NAME = init_connections(model_choice)
 
 # --- 3. Chat Session State ---
@@ -114,14 +115,17 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
 
         with st.spinner("Searching Hybrid Index..."):
             try:
-                # FIXED: Added the required 'idx_name' field
+                # FIXED: Removed 'alpha' and used Oracle-native weight parameters
                 retriever = OracleHybridSearchRetriever(
                     client=conn,
                     vector_store=v_store,
-                    idx_name=HYBRID_INDEX_NAME, # Explicitly required field
+                    idx_name=HYBRID_INDEX_NAME,
                     search_mode="hybrid",
                     k=5,
-                    params={"alpha": hybrid_alpha}
+                    params={
+                        "text_weight": text_w,
+                        "vector_weight": vector_w
+                    }
                 )
 
                 chain = RetrievalQA.from_chain_type(
@@ -136,4 +140,11 @@ if prompt := st.chat_input("Ask about Freddy's experience..."):
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
             except Exception as e:
-                st.error(f"Search Error: {e}")
+                # If error persists, fallback to standard vector search
+                st.warning(f"Hybrid search adjustment needed: {e}")
+                st.info("Falling back to semantic-only search...")
+                
+                standard_retriever = v_store.as_retriever(search_kwargs={"k": 5})
+                chain = RetrievalQA.from_chain_type(llm=llm, retriever=standard_retriever)
+                response = chain.invoke({"query": prompt})
+                st.markdown(response["result"])
