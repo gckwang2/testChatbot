@@ -6,21 +6,30 @@ st.set_page_config(page_title="Freddy's Long-Context Advocate", layout="centered
 
 # Initialize chat history
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "I have read Freddy's entire 200-page history. Ask me anything!"}]
+    st.session_state.messages = [{"role": "assistant", "content": "I have read Freddy's entire consolidated history. Ask me anything!"}]
 
-# --- 2. LOAD THE DATA (THE "PULL") ---
-# This function reads your 200-page file from your project folder.
+# --- 2. LOAD THE DATA FROM GITHUB REPO ---
+# When deployed on Streamlit Cloud, the 'resume.txt' is sitting in the 
+# same root directory as this script. We can read it directly.
 @st.cache_data
 def load_full_resume():
+    # We look for 'resume.txt' which is the standard output of your ingestion script
+    filename = "resume.txt"
     try:
-        with open("freddy_full_history.txt", "r", encoding="utf-8") as f:
+        with open(filename, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
-        return "Resume file not found. Please upload freddy_full_history.txt."
+        # If it's not found, we check if you kept the old name
+        try:
+            with open("freddy_full_history.txt", "r", encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return "Error: resume.txt not found in GitHub repository. Please run your ingestion script and push the output file to GitHub."
 
 full_context = load_full_resume()
 
 # --- 3. CONNECTION ---
+# Using the gemini-3-flash-preview model as requested
 llm = ChatGoogleGenerativeAI(
     model="gemini-3-flash-preview", 
     google_api_key=st.secrets["GOOGLE_API_KEY"],
@@ -33,18 +42,17 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # --- 5. THE LONG-CONTEXT INFERENCE ---
-if prompt := st.chat_input("Query Freddy's 200-page history..."):
+if prompt := st.chat_input("Query Freddy's consolidated history..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing full 200-page context..."):
-            # Instead of RAG, we "Stuff" the prompt.
-            # We put the context FIRST so the model can read it before the question.
+        with st.spinner("Searching full context..."):
+            # The "Long Context Stuffing" method
             system_prompt = f"""
             ROLE: You are Freddy Goh's Senior Career Advocate.
-            FULL CAREER DATA (200 PAGES):
+            FULL CAREER DATA:
             {full_context}
             
             USER QUESTION: {prompt}
@@ -53,8 +61,8 @@ if prompt := st.chat_input("Query Freddy's 200-page history..."):
             Be specific, reference dates/projects, and be persuasive.
             """
             
+            # Simple text extraction logic to avoid metadata errors
             response = llm.invoke(system_prompt)
-            # Standard cleanup to avoid metadata issues
             answer = response.content if hasattr(response, 'content') else str(response)
             
             st.markdown(answer)
