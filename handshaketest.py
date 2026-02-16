@@ -73,13 +73,15 @@ def init_connections(engine_choice):
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=st.secrets["GOOGLE_API_KEY"], thinking_budget=1024)
         
         elif engine_choice == "Qwen 3 Max (Direct Alibaba)":
+            # Switch to the primary global endpoint
             llm = ChatOpenAI(
                 model="qwen3-max", 
                 openai_api_key=st.secrets["QWEN_API_KEY"],
-                openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+                openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1"
             )
 
         elif engine_choice == "Qwen 3 Max Thinking (Alibaba)":
+            # If this one was already working, keep its current endpoint or align both
             llm = ChatOpenAI(
                 model="qwen3-max-2026-01-23", 
                 openai_api_key=st.secrets["QWEN_API_KEY"],
