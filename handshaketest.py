@@ -56,22 +56,18 @@ if prompt := st.chat_input("Ask about Freddy's AI experience"):
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # --- Find this section in your script ---
     with st.chat_message("assistant"):
-        # Retrieval
-        docs = v_store.similarity_search(prompt, k=5)
-        context = "\n\n".join([f"Source: {d.metadata.get('file_name')}\n{d.page_content}" for d in docs])
-        
-        system_prompt = f"Answer based on this context:\n{context}\n\nQuestion: {prompt}"
-        
-        # 🟢 THE FIX: Access only the content
-        raw_response = llm.invoke(system_prompt)
-        
-        # Ensure we extract the string content even if the object is complex
-        if isinstance(raw_response, AIMessage):
-            clean_text = raw_response.content
-        else:
-            # Fallback for some older LangChain wrappers
-            clean_text = raw_response if isinstance(raw_response, str) else raw_response.get('text', str(raw_response))
-
-        st.markdown(clean_text)
-        st.session_state.messages.append({"role": "assistant", "content": clean_text})
+        with st.spinner("Retrieving project evidence..."):
+            docs = get_targeted_context(prompt, v_store, conn)
+            
+            # ... (formatting context code) ...
+            
+            # 🟢 THE UPDATED PART:
+            response = llm.invoke(system_prompt)
+            
+            # We only want the TEXT, not the signatures or extras
+            clean_answer = response.content 
+    
+            st.markdown(clean_answer)
+            st.session_state.messages.append({"role": "assistant", "content": clean_answer})
