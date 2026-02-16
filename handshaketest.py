@@ -5,21 +5,13 @@ from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_oracledb import OracleVS
 from langchain_core.prompts import PromptTemplate
-from langchain_core.documents import Document  # FIXED IMPORT
+from langchain_core.documents import Document
 
 # --- 1. UI Setup ---
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 
-def update_greeting():
-    new_model = st.session_state.model_v4
-    greeting = f"I am now using {new_model}. How can I help?"
-    if "messages" in st.session_state:
-        st.session_state.messages[0] = {"role": "assistant", "content": greeting}
-    else:
-        st.session_state.messages = [{"role": "assistant", "content": greeting}]
-
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 Engine: Python-Side Hybrid Fusion (Vector + Keyword)")
+st.caption("2026 Engine: High-Precision Hybrid Search")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -30,11 +22,9 @@ with st.sidebar:
         "Groq Compound (Router Model)",
         "Llama 3.3 70B (Direct Groq)"
     ]
-    model_choice = st.selectbox("Select AI Engine:", options=available_models, key="model_v4", on_change=update_greeting)
-    
+    model_choice = st.selectbox("Select AI Engine:", options=available_models, key="model_v5")
     st.divider()
-    st.write("🔧 **Hybrid Search Power**")
-    keyword_boost = st.checkbox("Prioritize Exact Keyword Matches", value=True)
+    st.info("💡 Keyword Search is now hardcoded to prioritize exact 'AI Chatbot' and 'LangChain' matches.")
 
 # --- 2. Connection Logic ---
 @st.cache_resource
@@ -62,54 +52,56 @@ def init_connections(engine_choice):
 
 conn, v_store, llm = init_connections(model_choice)
 
-# --- 3. Custom Hybrid Search Logic ---
-def hybrid_search_logic(query, v_store, conn, boost_keywords=True):
-    # Part A: Semantic Search (Vector)
-    vector_results = v_store.similarity_search(query, k=4)
+# --- 3. Enhanced Hybrid Retrieval ---
+def get_targeted_context(query, v_store, conn):
+    # 1. Semantic search for "Meaning"
+    semantic_docs = v_store.similarity_search(query, k=3)
     
-    if not boost_keywords:
-        return vector_results
-
-    # Part B: Keyword Search (Direct SQL)
-    keyword_results = []
+    # 2. SQL LIKE search for "Exact Proof"
+    keyword_docs = []
     try:
         cursor = conn.cursor()
-        search_term = f"%{query}%"
-        # We search the TEXT column directly for exact matches
-        cursor.execute("SELECT TEXT FROM RESUME_SEARCH WHERE TEXT LIKE :1 FETCH FIRST 2 ROWS ONLY", [search_term])
-        for row in cursor:
-            keyword_results.append(Document(page_content=row[0], metadata={"source": "keyword_match"}))
+        # Search for synonyms of chatbots/ai in case the prompt is broad
+        search_terms = ["%chatbot%", "%AI%", "%LangChain%", "%RAG%"]
+        for term in search_terms:
+            cursor.execute("SELECT TEXT FROM RESUME_SEARCH WHERE TEXT LIKE :1 FETCH FIRST 1 ROWS ONLY", [term])
+            for row in cursor:
+                keyword_docs.append(Document(page_content=row[0], metadata={"source": "database_keyword"}))
     except:
-        pass 
+        pass
     
-    # Merge: Exact keyword matches are injected at the top of the list
-    return keyword_results + vector_results
+    return keyword_docs + semantic_docs
 
-# --- 4. Chat Loop ---
+# --- 4. Main Interaction ---
 if "messages" not in st.session_state:
-    update_greeting()
+    st.session_state.messages = [{"role": "assistant", "content": "Ask me about Freddy's AI projects or technical leadership."}]
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if prompt := st.chat_input("Ask about Freddy's skills..."):
+if prompt := st.chat_input("Does Freddy know AI Chatbots?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing Freddy's Resume..."):
-            # 1. Get Hybrid Context (Python-side fusion)
-            docs = hybrid_search_logic(prompt, v_store, conn, boost_keywords=keyword_boost)
-            context = "\n---\n".join([d.page_content for d in docs])
+        with st.spinner("Retrieving project evidence..."):
+            docs = get_targeted_context(prompt, v_store, conn)
             
-            # 2. Generate Answer
-            template = """
-            SYSTEM: You are Freddy's Career Agent. Use the context below to explain why he is a fit.
-            CONTEXT: {c}
-            QUESTION: {q}
-            ANSWER:
+            # Formatting the context as numbered evidence
+            context_list = [f"EVIDENCE {i+1}: {doc.page_content}" for i, doc in enumerate(docs)]
+            full_context = "\n\n".join(context_list)
+            
+            # The Prompt: Instructing the LLM to use the evidence found
+            system_prompt = f"""
+            SYSTEM: You are Freddy's Lead Recruiter. You must answer the question using ONLY the provided evidence.
+            If the evidence mentions specific frameworks like LangChain or Oracle 23ai, mention them.
+            
+            CONTEXT FROM FREDDY'S DATABASE:
+            {full_context}
+            
+            QUESTION: {prompt}
             """
-            response = llm.invoke(template.format(c=context, q=prompt))
             
+            response = llm.invoke(system_prompt)
             st.markdown(response.content)
             st.session_state.messages.append({"role": "assistant", "content": response.content})
