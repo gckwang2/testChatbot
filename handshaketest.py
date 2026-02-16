@@ -1,9 +1,8 @@
 import streamlit as st
-import oracledb
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
-from langchain_oracledb import OracleVS
+from langchain_milvus import Milvus  # 🟢 Switched from OracleVS
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 
@@ -11,7 +10,7 @@ from langchain_core.documents import Document
 st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
 
 st.title("🤖 Freddy's AI Career Assistant")
-st.caption("2026 Engine: High-Precision Hybrid Search")
+st.caption("2026 Engine: Zilliz Cloud Hybrid Search")
 
 with st.sidebar:
     st.header("Engine Settings")
@@ -24,79 +23,95 @@ with st.sidebar:
     ]
     model_choice = st.selectbox("Select AI Engine:", options=available_models, key="model_v5")
     st.divider()
-    st.info("💡 Keyword Search is now hardcoded to prioritize exact 'AI Chatbot' and 'LangChain' matches.")
+    st.write("🌐 **Database: Zilliz Cloud**")
+    st.info("Using high-precision HNSW indexing for career retrieval.")
 
 # --- 2. Connection Logic ---
 @st.cache_resource
 def init_connections(engine_choice):
     try:
-        conn = oracledb.connect(
-            user=st.secrets["DB_USER"],
-            password=st.secrets["DB_PASSWORD"],
-            dsn=st.secrets["DB_DSN"],
-            disable_oob=True
+        # 1. Embeddings
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/gemini-embedding-001", 
+            google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=st.secrets["GOOGLE_API_KEY"])
         
+        # 2. LLM Selection
         if "Qwen" in engine_choice:
-            llm = ChatOpenAI(model="qwen3-max-2026-01-23", openai_api_key=st.secrets["QWEN_API_KEY"], openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+            llm = ChatOpenAI(
+                model="qwen3-max-2026-01-23", 
+                openai_api_key=st.secrets["QWEN_API_KEY"], 
+                openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            )
         elif "Gemini" in engine_choice:
-            llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro", google_api_key=st.secrets["GOOGLE_API_KEY"])
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro", 
+                google_api_key=st.secrets["GOOGLE_API_KEY"]
+            )
         else:
-            llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
+            llm = ChatGroq(
+                model="llama-3.3-70b-versatile", 
+                groq_api_key=st.secrets["GROQ_API_KEY"]
+            )
 
-        v_store = OracleVS(client=conn, table_name="RESUME_SEARCH", embedding_function=embeddings)
-        return conn, v_store, llm
+        # 3. Milvus/Zilliz Vector Store
+        # Using the same connection_args that worked in your ingestion script
+        v_store = Milvus(
+            embedding_function=embeddings,
+            collection_name="RESUME_SEARCH",
+            connection_args={
+                "uri": st.secrets["ZILLIZ_URI"],
+                "token": st.secrets["ZILLIZ_TOKEN"],
+                "secure": True,
+                "pool_size": 5,
+                "client_config": {"wait_for_ready": True}
+            }
+        )
+        return v_store, llm
     except Exception as e:
-        st.error(f"❌ Connection Failed: {e}"); st.stop()
+        st.error(f"❌ Connection Failed: {e}")
+        st.stop()
 
-conn, v_store, llm = init_connections(model_choice)
+v_store, llm = init_connections(model_choice)
 
-# --- 3. Enhanced Hybrid Retrieval ---
-def get_targeted_context(query, v_store, conn):
-    # 1. Semantic search for "Meaning"
-    semantic_docs = v_store.similarity_search(query, k=3)
-    
-    # 2. SQL LIKE search for "Exact Proof"
-    keyword_docs = []
-    try:
-        cursor = conn.cursor()
-        # Search for synonyms of chatbots/ai in case the prompt is broad
-        search_terms = ["%chatbot%", "%AI%", "%LangChain%", "%RAG%"]
-        for term in search_terms:
-            cursor.execute("SELECT TEXT FROM RESUME_SEARCH WHERE TEXT LIKE :1 FETCH FIRST 1 ROWS ONLY", [term])
-            for row in cursor:
-                keyword_docs.append(Document(page_content=row[0], metadata={"source": "database_keyword"}))
-    except:
-        pass
-    
-    return keyword_docs + semantic_docs
+# --- 3. Retrieval Logic ---
+def get_targeted_context(query, v_store):
+    # Milvus handles the hybrid nature via the index. 
+    # We will fetch the top 5 most relevant chunks.
+    docs = v_store.similarity_search(query, k=5)
+    return docs
 
 # --- 4. Main Interaction ---
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Ask me about Freddy's AI projects or technical leadership."}]
 
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    with st.chat_message(msg["role"]): 
+        st.markdown(msg["content"])
 
 if prompt := st.chat_input("Does Freddy know AI Chatbots?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"): 
+        st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Retrieving project evidence..."):
-            docs = get_targeted_context(prompt, v_store, conn)
+        with st.spinner("Searching Zilliz Cloud..."):
+            docs = get_targeted_context(prompt, v_store)
             
-            # Formatting the context as numbered evidence
-            context_list = [f"EVIDENCE {i+1}: {doc.page_content}" for i, doc in enumerate(docs)]
-            full_context = "\n\n".join(context_list)
+            # Formatting context with source info (matching our cleaned metadata)
+            context_list = []
+            for i, doc in enumerate(docs):
+                source_file = doc.metadata.get("file_name", "Unknown")
+                page_num = doc.metadata.get("page", "?")
+                context_list.append(f"SOURCE: {source_file} (Pg {page_num})\nCONTENT: {doc.page_content}")
             
-            # The Prompt: Instructing the LLM to use the evidence found
+            full_context = "\n\n---\n\n".join(context_list)
+            
             system_prompt = f"""
             SYSTEM: You are Freddy's Lead Recruiter. You must answer the question using ONLY the provided evidence.
-            If the evidence mentions specific frameworks like LangChain or Oracle 23ai, mention them.
+            Be specific about his achievements (e.g., specific percentages or project names).
             
-            CONTEXT FROM FREDDY'S DATABASE:
+            CONTEXT:
             {full_context}
             
             QUESTION: {prompt}
