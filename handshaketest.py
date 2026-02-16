@@ -76,7 +76,7 @@ if prompt := st.chat_input("Ask about Freddy's experience"):
                 try:
                     # 🟢 THE CHANGE: Use similarity_search_with_score
                     # This returns a list of tuples: (Document, Score)
-                    docs_with_scores = v_store.similarity_search_with_score(prompt, k=5)
+                    docs_with_scores = v_store.similarity_search_with_score(prompt, k=15)
 
                     context_entries = []
                     score_debug = []
