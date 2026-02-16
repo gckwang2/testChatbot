@@ -13,13 +13,13 @@ st.caption("2026 Engine: Zilliz Cloud Hybrid Search")
 # --- 2. Connection Logic ---
 @st.cache_resource
 def init_connections(engine_choice):
-    # Standard Embeddings
+    # Standard Embeddings for Vector Search
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-001", 
         google_api_key=st.secrets["GOOGLE_API_KEY"]
     )
     
-    # --- MODEL ROUTING ---
+    # --- MODEL ROUTING LOGIC ---
     if "Qwen" in engine_choice:
         llm = ChatOpenAI(
             model="qwen3-max-2026-01-23", 
@@ -31,11 +31,14 @@ def init_connections(engine_choice):
             model="gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
-    elif "Groq" in engine_choice or "Llama" in engine_choice or "GPT-OSS" in engine_choice:
-        # GPT-OSS 120B and Llama are both served via Groq in this configuration
-        target_model = "llama-3.3-70b-versatile" 
+    elif "GPT-OSS-120B" in engine_choice or "Groq" in engine_choice or "Llama" in engine_choice:
+        # Assigning specific model IDs for Groq
         if "120B" in engine_choice:
-            target_model = "mixtral-8x7b-32768" # Or the specific 120B ID provided by Groq
+            target_model = "mixtral-8x7b-32768" 
+        elif "Llama 3.3" in engine_choice:
+            target_model = "llama-3.3-70b-versatile"
+        else:
+            target_model = "llama-3.3-70b-versatile" # Default Groq choice
             
         llm = ChatGroq(
             model=target_model, 
@@ -44,7 +47,7 @@ def init_connections(engine_choice):
     else:
         llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
 
-    # Milvus Connection
+    # --- ZILLIZ CLOUD CONNECTION ---
     v_store = Milvus(
         embedding_function=embeddings,
         collection_name="RESUME_SEARCH",
@@ -58,7 +61,7 @@ def init_connections(engine_choice):
     )
     return v_store, llm
 
-# --- SIDEBAR WITH ALL MODELS ---
+# --- 3. Sidebar Configuration ---
 with st.sidebar:
     st.header("Engine Settings")
     available_models = [
@@ -71,81 +74,32 @@ with st.sidebar:
     ]
     model_choice = st.selectbox("Select AI Engine:", options=available_models, key="model_v5")
     st.divider()
-    st.info("💡 Connected to Zilliz Cloud (Milvus)")
+    st.info("💡 Connected: Zilliz Cloud (Milvus)")
+    if st.button("Clear Chat History"):
+        st.session_state.messages = []
+        st.rerun()
 
+# Initialize the connections
 v_store, llm = init_connections(model_choice)
 
-# --- 3. Chat Interaction ---
+# --- 4. Chat Interaction Loop ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Render existing chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# Main Chat Input UI
 if prompt := st.chat_input("Ask about Freddy's AI experience"):
+    # Display user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Generate Assistant response
     with st.chat_message("assistant"):
-        with st.spinner(f"Querying {model_choice}..."):
-            # 1. Retrieval
-            docs = v_store.similarity_search(prompt, k=5)
-            context = "\n\n".join([f"Source: {d.metadata.get('file_name')}\n{d.page_content}" for d in docs])
-            
-            system_prompt = f"""
-            SYSTEM: You are Freddy's Lead Recruiter. Use the following context to answer the question. 
-            CONTEXT:
-            {context}
-            
-            QUESTION: {prompt}
-            """
-            
-            # 2. Invoke LLM
-            raw_response = llm.invoke(system_prompt)
-            
-# --- 3. Chat Interaction ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Display previous messages
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# Main Chat Input
-if prompt := st.chat_input("Ask about Freddy's AI experience"):
-    # 1. Display and Save User Message
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # 2. Generate and Display Assistant Response
-    with st.chat_message("assistant"):
-        with st.spinner(f"Querying {model_choice}..."):
+        with st.spinner(f"Analysing Freddy's data via {model_choice}..."):
             try:
-                # Retrieval
-                docs = v_store.similarity_search(prompt, k=5)
-                context = "\n\n".join([f"Source: {d.metadata.get('file_name', 'Doc')}\n{d.page_content}" for d in docs])
-                
-                system_prompt = f"Answer based on this context:\n{context}\n\nQuestion: {prompt}"
-                
-                # Invoke LLM
-                response = llm.invoke(system_prompt)
-                
-                # Clean the response content
-                if isinstance(response.content, str):
-                    clean_text = response.content
-                elif isinstance(response.content, list):
-                    clean_text = "".join([part['text'] for part in response.content if 'text' in part])
-                else:
-                    clean_text = str(response.content)
-
-                # 3. Final Output and Save
-                st.markdown(clean_text)
-                st.session_state.messages.append({"role": "assistant", "content": clean_text})
-                
-            except Exception as e:
-                error_msg = f"❌ Error generating response: {str(e)}"
-                st.error(error_msg)
+                # A. Retrieval from
