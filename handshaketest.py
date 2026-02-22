@@ -87,7 +87,7 @@ def init_connections(engine_choice):
             model="gemini-3-flash-preview" if "Gemini 3" in engine_choice else "gemini-2.5-pro",
             google_api_key=st.secrets["GOOGLE_API_KEY"],
             temperature=0.1,
-            extra_body={"thinking_level": "medium"}
+            extra_body={"thinking_level": "low"}
         )
 
         graph = Neo4jGraph(
