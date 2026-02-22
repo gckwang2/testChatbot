@@ -4,17 +4,18 @@ from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_milvus import Milvus 
 from langchain_core.messages import AIMessage
+from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 
 # --- 1. UI & Page Setup ---
-st.set_page_config(page_title="Freddy Goh's AI Skills", layout="centered")
+st.set_page_config(page_title="Freddy's Agentic GraphRAG", layout="wide")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I am Freddy's Agentic Career Advocate. I'm ready to research his 23-year career across all technical domains."}
+        {"role": "assistant", "content": "Hello! I am now powered by Hybrid Graph + Vector RAG. I can see both your documents and the relationships between your skills."}
     ]
 
 st.title("🤖 Freddy's Agentic Career Assistant")
-st.caption("2026 Engine: Agentic RAG | High-Recall Multi-Query Search")
+st.caption("2026 Engine: Hybrid GraphRAG | Milvus (Vectors) + Neo4j (Relationships)")
 
 # --- 2. THE CLEANER ---
 def extract_clean_text(response):
@@ -22,41 +23,29 @@ def extract_clean_text(response):
         content = response.content
     else:
         content = response
-
     if isinstance(content, list):
-        if len(content) > 0 and isinstance(content[0], dict):
-            return content[0].get('text', str(content[0]))
-        return " ".join([str(i) for i in content])
-    
+        return " ".join([str(i.get('text', i)) if isinstance(i, dict) else str(i) for i in content])
     return str(content)
 
-# --- 3. Multi-Model Connection Logic ---
+# --- 3. Multi-Model & Multi-DB Connection Logic ---
 @st.cache_resource
 def init_connections(engine_choice):
     try:
+        # A. Embeddings
         embeddings = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # 2026 Optimized Model IDs
-        if "Qwen" in engine_choice:
-            llm = ChatOpenAI(
-                model="qwen3-max-2026-01-23", 
-                openai_api_key=st.secrets["QWEN_API_KEY"], 
-                openai_api_base="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-            )
-        elif "Gemini" in engine_choice:
+        # B. LLM Selection
+        if "Gemini" in engine_choice:
             target = "gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro"
             llm = ChatGoogleGenerativeAI(model=target, google_api_key=st.secrets["GOOGLE_API_KEY"])
-        elif "GPT-OSS-120B" in engine_choice:
-            llm = ChatGroq(model="gpt-oss-120b", groq_api_key=st.secrets["GROQ_API_KEY"])
-        elif "Llama 4 Scout" in engine_choice:
-            llm = ChatGroq(model="llama-4-scout-17b", groq_api_key=st.secrets["GROQ_API_KEY"])
         else:
-            # Fallback for Groq Compound/Others
+            # Simplified fallback for this example
             llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
 
+        # C. Milvus (Vector Store)
         v_store = Milvus(
             embedding_function=embeddings,
             collection_name="RESUME_SEARCH",
@@ -66,89 +55,74 @@ def init_connections(engine_choice):
                 "secure": True
             }
         )
-        return v_store, llm
-    except Exception as e:
-        return None, str(e)
 
-# --- 4. Sidebar Engine Selection ---
+        # D. Neo4j (Graph Store) - Using your confirmed OCI details
+        graph = Neo4jGraph(
+            url=st.secrets["NEO4J_URI"],
+            username=st.secrets["NEO4J_USERNAME"],
+            password=st.secrets["NEO4J_PASSWORD"],
+            database="73fe4e5f",
+            refresh_schema=True # Important to see your 959 nodes!
+        )
+        
+        return v_store, graph, llm
+    except Exception as e:
+        return None, None, str(e)
+
+# --- 4. Sidebar ---
 with st.sidebar:
     st.header("Engine Settings")
-    available_models = [
-        "Groq Compound (Router)",
-        "GPT-OSS-120B (Groq)",
-        "Llama 4 Scout 17B 16E (Groq)",
-        "Gemini 3 Flash (Google)", 
-        "Gemini 2.5 Pro (Google)", 
-        "Qwen 3 Max Thinking (Alibaba)"
-    ]
+    available_models = ["Gemini 3 Flash (Google)", "Gemini 2.5 Pro (Google)"]
     model_choice = st.selectbox("Select AI Engine:", options=available_models)
-    v_store, llm = init_connections(model_choice)
+    v_store, graph, llm = init_connections(model_choice)
     
-    if v_store and not isinstance(llm, str):
-        st.success(f"Online: {model_choice}")
-    elif isinstance(llm, str):
-        st.error(f"Connection Error: {llm}")
-    
-    if st.button("Clear History"):
-        st.session_state.messages = [{"role": "assistant", "content": "Research reset. How can I help?"}]
-        st.rerun()
+    if v_store and graph and not isinstance(llm, str):
+        st.success("✅ Systems Online: Milvus + Neo4j")
+    else:
+        st.error(f"❌ Connection Error: {llm}")
 
-# --- 5. Display History ---
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# --- 6. The Agentic Logic ---
-if prompt := st.chat_input("Ask about Freddy's potential..."):
+# --- 5. Logic: Vector + Graph Search ---
+if prompt := st.chat_input("Ask about Freddy's skills..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        if not v_store or isinstance(llm, str):
-            st.error("System is offline. Check API keys and Model selection.")
+        if not v_store or not graph:
+            st.error("System Offline.")
         else:
             try:
-                # --- PHASE 1: Agent Research Plan ---
-                planning_prompt = f"Identify 3 distinct technical search queries to evaluate: '{prompt}'. Output queries only, one per line."
-                
-                with st.spinner("🧠 Agent Planning Research..."):
-                    plan_res = llm.invoke(planning_prompt)
-                    clean_plan = extract_clean_text(plan_res)
-                    search_topics = [t.strip() for t in clean_plan.split("\n") if t.strip() and not t.startswith('-')][:3]
+                # --- PHASE 1: Graph Retrieval (Relationships) ---
+                with st.spinner("🕸️ Querying Knowledge Graph..."):
+                    cypher_chain = GraphCypherQAChain.from_llm(
+                        cypher_llm=llm, 
+                        qa_llm=llm, 
+                        graph=graph, 
+                        verbose=True,
+                        allow_dangerous_requests=True
+                    )
+                    graph_context = cypher_chain.invoke({"query": prompt})['result']
 
-                # --- PHASE 2: Execution ---
-                accumulated_context = []
-                retriever = v_store.as_retriever(search_kwargs={"k": 5})
-                
-                for topic in search_topics:
-                    with st.spinner(f"🔍 Searching: {topic}..."):
-                        docs = retriever.invoke(topic)
-                        accumulated_context.extend([d.page_content for d in docs])
+                # --- PHASE 2: Vector Retrieval (Raw Text) ---
+                with st.spinner("🔍 Searching Vector Documents..."):
+                    docs = v_store.similarity_search(prompt, k=3)
+                    vector_context = "\n".join([d.page_content for d in docs])
 
-                # --- PHASE 3: Synthesis & Advocacy ---
-                context_str = "\n\n".join(list(set(accumulated_context)))
+                # --- PHASE 3: Hybrid Synthesis ---
+                final_prompt = f"""
+                You are a career advocate. Combine the structural facts from the Graph and the detailed stories from the Vector search.
                 
-                final_agent_prompt = f"""
-                ROLE: Professional Career Advocate. 
+                GRAPH FACTS: {graph_context}
+                DOCUMENT DETAILS: {vector_context}
                 
-                CONTEXT:
-                {context_str}
+                QUESTION: {prompt}
                 
-                USER QUESTION: {prompt}
-                
-                TASK:
-                1. Analyze context for direct evidence and transferable skills.
-                2. Given Freddy's 23+ years of seniority, infer expertise for related technologies (e.g., if Cloud Architecture is found, infer platform adaptability).
-                3. Focus on leadership and high-level business impact.
-                4. No JSON or technical signatures. Do not mention your role title.
+                Synthesize a high-impact response.
                 """
+                
+                res = llm.invoke(final_prompt)
+                answer = extract_clean_text(res)
+                st.markdown(answer)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
 
-                with st.spinner("⚖️ Synthesizing Final Answer..."):
-                    final_res = llm.invoke(final_agent_prompt)
-                    answer = extract_clean_text(final_res)
-                    
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
             except Exception as e:
-                st.error(f"Agent Logic Failed: {e}. Try a different model in the sidebar.")
+                st.error(f"Logic Failed: {e}")
