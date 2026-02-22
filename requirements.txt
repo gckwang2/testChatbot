@@ -17,3 +17,4 @@ nest-asyncio
 langchain-milvus
 pymilvus>=2.4.0
 langchain-neo4j
+nest_asyncio
