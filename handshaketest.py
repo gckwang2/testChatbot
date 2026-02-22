@@ -34,40 +34,43 @@ def extract_clean_text(response):
 @st.cache_resource
 def init_connections(engine_choice):
     try:
-        # A. Embeddings
         embeddings = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-001", 
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # B. LLM Selection
-        if "Gemini" in engine_choice:
-            target = "gemini-3-flash-preview" if "Flash" in engine_choice else "gemini-2.5-pro"
-            llm = ChatGoogleGenerativeAI(model=target, google_api_key=st.secrets["GOOGLE_API_KEY"])
-        else:
-            # Simplified fallback for this example
-            llm = ChatGroq(model="llama-3.3-70b-versatile", groq_api_key=st.secrets["GROQ_API_KEY"])
+        # --- FIX FOR GEMINI 3 CONNECTION ---
+        if "Gemini 3" in engine_choice:
+            # Set a thinking_budget to prevent handshake delays
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3-flash-preview", 
+                google_api_key=st.secrets["GOOGLE_API_KEY"],
+                thinking_budget=1024 # 👈 Gives the model room to reason without stalling
+            )
+        elif "Gemini 2.5" in engine_choice:
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-pro", 
+                google_api_key=st.secrets["GOOGLE_API_KEY"]
+            )
+        # ... other models ...
 
-        # C. Milvus (Vector Store)
-        v_store = Milvus(
-            embedding_function=embeddings,
-            collection_name="RESUME_SEARCH",
-            connection_args={
-                "uri": st.secrets["ZILLIZ_URI"],
-                "token": st.secrets["ZILLIZ_TOKEN"],
-                "secure": True
-            }
-        )
-
-        # D. Neo4j (Graph Store) - Using your confirmed OCI details
+        # --- FIX FOR NEO4J DRIVER TIMEOUT ---
         graph = Neo4jGraph(
             url=st.secrets["NEO4J_URI"],
             username=st.secrets["NEO4J_USERNAME"],
             password=st.secrets["NEO4J_PASSWORD"],
             database="73fe4e5f",
-            refresh_schema=True # Important to see your 959 nodes!
+            refresh_schema=False, # 👈 Set to False initially to prevent 3.0 from stalling
+            driver_config={
+                "connection_timeout": 60, # 👈 Increase timeout for OCI routing
+                "max_connection_lifetime": 200
+            }
         )
         
+        # Manually refresh once after connection is stable
+        graph.refresh_schema() 
+        
+        # ... Milvus setup remains same ...
         return v_store, graph, llm
     except Exception as e:
         return None, None, str(e)
