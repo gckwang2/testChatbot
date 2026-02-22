@@ -1,3 +1,6 @@
+import asyncio
+import nest_asyncio
+nest_asyncio.apply()
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
