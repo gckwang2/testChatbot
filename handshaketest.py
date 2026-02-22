@@ -41,8 +41,23 @@ def update_usage(response, llm_object):
         st.session_state.total_tokens += (in_toks + out_toks)
 
 def extract_clean_text(response):
+    """Robust cleaner for Gemini 3 multimodal and structured response objects."""
+    # 1. Handle the specific list-of-dicts format you just received
+    if isinstance(response, list) and len(response) > 0:
+        item = response[0]
+        if isinstance(item, dict) and 'text' in item:
+            return item['text']
+            
+    # 2. Handle LangChain Message objects (AI Message)
     if hasattr(response, 'content'):
-        return str(response.content)
+        content = response.content
+        # Sometimes content itself is a list of dicts
+        if isinstance(content, list) and len(content) > 0:
+            if isinstance(content[0], dict) and 'text' in content[0]:
+                return content[0]['text']
+        return str(content)
+        
+    # 3. Fallback for raw strings
     return str(response)
 
 async def run_parallel_queries(prompt, llm, graph, v_store):
