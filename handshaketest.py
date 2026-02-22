@@ -1,8 +1,8 @@
 import asyncio
 import nest_asyncio
-import time  # 👈 Added for high-precision timing
+import time
 from datetime import datetime
-nest_asyncio.apply()
+nest_asyncio.apply()  # Fixes Milvus event loop crash
 
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -11,10 +11,10 @@ from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_core.globals import set_llm_cache
 from langchain_core.caches import InMemoryCache
 
-# Activate Semantic Cache
+# 1. INITIALIZE GLOBAL CACHE
 set_llm_cache(InMemoryCache())
 
-# --- 1. UI & Pricing Setup ---
+# 2. UI & PRICING CONFIG
 st.set_page_config(page_title="Freddy's Agentic GraphRAG", layout="wide")
 
 PRICING = {
@@ -25,28 +25,11 @@ PRICING = {
 if "total_cost" not in st.session_state: st.session_state.total_cost = 0.0
 if "total_tokens" not in st.session_state: st.session_state.total_tokens = 0
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Systems Online. Performance tracking active."}]
+    st.session_state.messages = [{"role": "assistant", "content": "Parallel Systems Active. Ready for Hybrid RAG."}]
 
-# --- 2. Timing Utility ---
-def log_stage(stage_name, start_time):
-    """Calculates elapsed time and prints a formatted log."""
-    elapsed = time.time() - start_time
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    log_msg = f"[{timestamp}] ⏱️ {stage_name}: {elapsed:.2f}s"
-    print(log_msg)  # Prints to your terminal/OCI logs
-    return log_msg, time.time() # Returns message and new reference start time
-
-# --- [Keep Helper Functions extract_clean_text and update_usage from before] ---
-def extract_clean_text(response):
-    if hasattr(response, 'content'):
-        content = response.content
-        if isinstance(content, list) and len(content) > 0:
-            if isinstance(content[0], dict) and 'text' in content[0]:
-                return content[0]['text']
-        return str(content)
-    return str(response)
-
+# 3. HELPER FUNCTIONS
 def update_usage(response, llm_object):
+    """Updates the cost tracker using 2026 attribute standards."""
     model_id = getattr(llm_object, "model", "gemini-3-flash-preview")
     if hasattr(response, 'usage_metadata'):
         usage = response.usage_metadata
@@ -57,73 +40,101 @@ def update_usage(response, llm_object):
         st.session_state.total_cost += cost
         st.session_state.total_tokens += (in_toks + out_toks)
 
-# --- 3. Connection Logic ---
+def extract_clean_text(response):
+    if hasattr(response, 'content'):
+        return str(response.content)
+    return str(response)
+
+async def run_parallel_queries(prompt, llm, graph, v_store):
+    """Executes Graph and Vector searches simultaneously to reduce latency."""
+    graph_chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
+    
+    t_start = time.time()
+    # Task 1: Neo4j Cypher Execution
+    task1 = asyncio.to_thread(graph_chain.invoke, {"query": prompt})
+    # Task 2: Milvus Vector Search
+    task2 = asyncio.to_thread(v_store.similarity_search, prompt, k=3)
+
+    g_res, v_docs = await asyncio.gather(task1, task2)
+    
+    elapsed = time.time() - t_start
+    v_context = "\n".join([d.page_content for d in v_docs])
+    return g_res.get("result"), v_context, elapsed
+
+# 4. CONNECTION LOGIC
 @st.cache_resource
 def init_connections(engine_choice):
     try:
         embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=st.secrets["GOOGLE_API_KEY"])
+        
+        # 0.1 Temperature + Disable Thinking Budget to fix the 35s delay
         llm = ChatGoogleGenerativeAI(
             model="gemini-3-flash-preview" if "Gemini 3" in engine_choice else "gemini-2.5-pro",
-            google_api_key=st.secrets["GOOGLE_API_KEY"]
+            google_api_key=st.secrets["GOOGLE_API_KEY"],
+            temperature=0.1,
+            thinking_budget=0  # 👈 Crucial: Disables the "Thinking" pause
         )
-        graph = Neo4jGraph(url=st.secrets["NEO4J_URI"], username=st.secrets["NEO4J_USERNAME"], password=st.secrets["NEO4J_PASSWORD"], database="73fe4e5f")
-        v_store = Milvus(embedding_function=embeddings, collection_name="RESUME_SEARCH", 
-                        connection_args={"uri": st.secrets["ZILLIZ_URI"], "token": st.secrets["ZILLIZ_TOKEN"], "secure": True})
+
+        graph = Neo4jGraph(
+            url=st.secrets["NEO4J_URI"], 
+            username=st.secrets["NEO4J_USERNAME"], 
+            password=st.secrets["NEO4J_PASSWORD"], 
+            database="73fe4e5f"
+        )
+        
+        v_store = Milvus(
+            embedding_function=embeddings, 
+            collection_name="RESUME_SEARCH", 
+            connection_args={"uri": st.secrets["ZILLIZ_URI"], "token": st.secrets["ZILLIZ_TOKEN"], "secure": True}
+        )
         return v_store, graph, llm
     except Exception as e: return None, None, str(e)
 
-# --- 4. Sidebar ---
+# 5. SIDEBAR
 with st.sidebar:
-    st.header("💳 Usage & Performance")
+    st.header("💳 Session Metrics")
     st.metric("Total Cost", f"${st.session_state.total_cost:.4f}")
     st.metric("Tokens", f"{st.session_state.total_tokens:,}")
-    model_choice = st.selectbox("Engine:", ["Gemini 3 Flash (Google)", "Gemini 2.5 Pro (Google)"])
+    if st.button("Reset Stats"):
+        st.session_state.total_cost = 0.0
+        st.session_state.total_tokens = 0
+        st.rerun()
+    st.divider()
+    model_choice = st.selectbox("Engine:", ["Gemini 3 Flash", "Gemini 2.5 Pro"])
     v_store, graph, result = init_connections(model_choice)
     llm = result if v_store and graph and not isinstance(result, str) else None
 
-# --- 5. Hybrid RAG Logic with Timing ---
+# 6. MAIN CHAT LOOP
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if prompt := st.chat_input("Ask about Freddy's career..."):
+if prompt := st.chat_input("Ask about Freddy..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        try:
-            query_start = time.time()
-            perf_logs = []
+        if not llm:
+            st.error("System Offline. Check sidebar.")
+        else:
+            try:
+                # STEP 1 & 2: Parallel Retrieval
+                with st.spinner("🚀 Parallel Graph + Vector Search..."):
+                    g_context, v_context, retrieval_time = asyncio.run(
+                        run_parallel_queries(prompt, llm, graph, v_store)
+                    )
 
-            # Stage 1: Graph Search
-            with st.spinner("🕸️ Graph Search..."):
-                t_ref = time.time()
-                graph_chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
-                g_res = graph_chain.invoke({"query": prompt})
-                log, t_ref = log_stage("Graph RAG", t_ref)
-                perf_logs.append(log)
+                # STEP 3: Final Synthesis
+                with st.spinner("⚖️ Final Synthesis..."):
+                    t_syn_start = time.time()
+                    final_prompt = f"Graph Context: {g_context}\nText Context: {v_context}\nQuestion: {prompt}"
+                    ans = llm.invoke(final_prompt)
+                    update_usage(ans, llm)
+                    synthesis_time = time.time() - t_syn_start
 
-            # Stage 2: Vector Search
-            with st.spinner("🔍 Vector Search..."):
-                docs = v_store.similarity_search(prompt, k=3)
-                v_context = "\n".join([d.page_content for d in docs])
-                log, t_ref = log_stage("Vector Retrieval", t_ref)
-                perf_logs.append(log)
-
-            # Stage 3: Synthesis
-            with st.spinner("⚖️ Final Synthesis..."):
-                ans = llm.invoke(f"Graph: {g_res['result']}\nText: {v_context}\nQ: {prompt}")
-                update_usage(ans, llm)
-                log, t_ref = log_stage("LLM Synthesis", t_ref)
-                perf_logs.append(log)
-
-            # Final Display
-            total_time = time.time() - query_start
-            full_text = extract_clean_text(ans)
-            st.markdown(full_text)
-            
-            # Show performance footer
-            st.caption(f"⏱️ Total: {total_time:.2f}s | " + " | ".join(perf_logs))
-            st.session_state.messages.append({"role": "assistant", "content": full_text})
-            
-        except Exception as e:
-            st.error(f"Error: {e}")
+                # UI Display
+                full_text = extract_clean_text(ans)
+                st.markdown(full_text)
+                st.caption(f"⏱️ Retrieval: {retrieval_time:.2f}s | Synthesis: {synthesis_time:.2f}s")
+                st.session_state.messages.append({"role": "assistant", "content": full_text})
+            except Exception as e:
+                st.error(f"Error: {e}")
