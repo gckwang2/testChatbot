@@ -1,6 +1,6 @@
 import asyncio
 import nest_asyncio
-nest_asyncio.apply()  # 👈 Essential fix for Milvus + Streamlit
+nest_asyncio.apply()  # 👈 MUST BE AT THE TOP: Fixes the Milvus event loop crash
 
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -9,30 +9,39 @@ from langchain_milvus import Milvus
 from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 
 # --- 1. UI & Page Setup ---
-st.set_page_config(page_title="Freddy's Agentic GraphRAG", layout="wide")
+st.set_page_config(page_title="Freddy's Hybrid Agent", layout="wide")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! I am Freddy's Hybrid Graph + Vector Agent. Ask me about his technical skills!"}
+        {"role": "assistant", "content": "System initialized. Vector (Milvus) and Graph (Neo4j) modules are ready."}
     ]
 
 st.title("🤖 Freddy's Agentic Career Assistant")
-st.caption("2026 Engine: Milvus (Vector) + Neo4j (Graph)")
+st.caption("2026 Engine: Hybrid GraphRAG | High-Recall Search")
 
-# --- 2. Helper Logic ---
+# --- 2. THE CLEANER (Updated for Gemini 3 Multimodal Blocks) ---
 def extract_clean_text(response):
+    """Digs into the complex response objects returned by Gemini 3.0."""
+    # Handle the specific [{'type': 'text', 'text': '...'}] format
+    if isinstance(response, list) and len(response) > 0:
+        item = response[0]
+        if isinstance(item, dict) and 'text' in item:
+            return item['text']
+    
+    # Handle LangChain Message objects
     if hasattr(response, 'content'):
         content = response.content
-    else:
-        content = response
-    return str(content)
+        if isinstance(content, list) and len(content) > 0:
+            if isinstance(content[0], dict) and 'text' in content[0]:
+                return content[0]['text']
+        return str(content)
+    
+    return str(response)
 
-# --- 3. Robust Connection Logic ---
+# --- 3. Multi-DB Connection Logic ---
 @st.cache_resource
 def init_connections(engine_choice):
-    # Initialize variables as None so we don't get "not defined" errors
     v_store, graph, llm = None, None, None
-    
     try:
         # A. Embeddings
         embeddings = GoogleGenerativeAIEmbeddings(
@@ -40,12 +49,13 @@ def init_connections(engine_choice):
             google_api_key=st.secrets["GOOGLE_API_KEY"]
         )
         
-        # B. LLM Selection with Gemini 3 "Thinking" Fix
+        # B. LLM Selection (Gemini 3 Flash 2026 Config)
         if "Gemini 3" in engine_choice:
             llm = ChatGoogleGenerativeAI(
                 model="gemini-3-flash-preview", 
                 google_api_key=st.secrets["GOOGLE_API_KEY"],
-                thinking_budget=1024 # 👈 Prevents Gemini 3 from stalling the handshake
+                thinking_level="low", # 👈 Faster for RAG handshake than "high"
+                temperature=1.0      # 👈 Gemini 3 standard for reasoning
             )
         else:
             llm = ChatGoogleGenerativeAI(
@@ -53,19 +63,18 @@ def init_connections(engine_choice):
                 google_api_key=st.secrets["GOOGLE_API_KEY"]
             )
 
-        # C. Neo4j with Timeout Fix
+        # C. Neo4j Connection (with OCI Timeout Protection)
         graph = Neo4jGraph(
             url=st.secrets["NEO4J_URI"],
             username=st.secrets["NEO4J_USERNAME"],
             password=st.secrets["NEO4J_PASSWORD"],
             database="73fe4e5f",
-            refresh_schema=False, # 👈 Don't refresh immediately to avoid timeouts
+            refresh_schema=False, # 👈 Manual refresh below to avoid startup hang
             driver_config={"connection_timeout": 60}
         )
-        # Safe manual refresh
         graph.refresh_schema()
 
-        # D. Milvus
+        # D. Milvus Connection
         v_store = Milvus(
             embedding_function=embeddings,
             collection_name="RESUME_SEARCH",
@@ -78,51 +87,69 @@ def init_connections(engine_choice):
         return v_store, graph, llm
 
     except Exception as e:
-        # If any part fails, return the error message so we can see it in UI
         return None, None, str(e)
 
-# --- 4. Sidebar ---
+# --- 4. Sidebar Engine Selection ---
 with st.sidebar:
-    st.header("Engine Settings")
+    st.header("System Control")
     available_models = ["Gemini 3 Flash (Google)", "Gemini 2.5 Pro (Google)"]
-    model_choice = st.selectbox("Select AI Engine:", options=available_models)
+    model_choice = st.selectbox("Select Intelligence Engine:", options=available_models)
     
-    # Get connections
     v_store, graph, result = init_connections(model_choice)
     
-    # 'result' will contain the error string if llm is None
-    if v_store and graph:
-        st.success(f"✅ Connected to Milvus + Neo4j")
-        llm = result # In success case, the 3rd return is the LLM
+    if v_store and graph and not isinstance(result, str):
+        st.success("🟢 All Systems Online")
+        llm = result
     else:
-        st.error(f"❌ Connection Error: {result}")
+        st.error(f"🔴 System Error: {result}")
         llm = None
 
-# --- 5. RAG Execution ---
-if prompt := st.chat_input("Ask about Freddy's skills..."):
+# --- 5. The Hybrid RAG Logic ---
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]): st.markdown(msg["content"])
+
+if prompt := st.chat_input("Ask about Freddy's potential..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
         if not v_store or not graph or not llm:
-            st.error("One or more systems are offline. Please check the sidebar.")
+            st.error("System offline. Please check API keys and Sidebar.")
         else:
             try:
-                # 1. Graph Context
-                with st.spinner("🕸️ Querying Graph (Relationships)..."):
-                    chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
-                    g_res = chain.invoke({"query": prompt})
-                    graph_context = g_res.get('result', "No graph data found.")
+                # PHASE 1: Graph Relationship Search
+                with st.spinner("🕸️ Querying Skills Graph..."):
+                    # allow_dangerous_requests is required for write-capable drivers in 2026
+                    graph_chain = GraphCypherQAChain.from_llm(
+                        llm, 
+                        graph=graph, 
+                        allow_dangerous_requests=True,
+                        verbose=True
+                    )
+                    graph_data = graph_chain.invoke({"query": prompt})['result']
 
-                # 2. Vector Context
-                with st.spinner("🔍 Querying Milvus (Raw Text)..."):
+                # PHASE 2: Vector Document Search
+                with st.spinner("🔍 Retrieving Document Context..."):
                     docs = v_store.similarity_search(prompt, k=3)
-                    vector_context = "\n".join([d.page_content for d in docs])
+                    vector_data = "\n\n".join([d.page_content for d in docs])
 
-                # 3. Final Answer
-                final_prompt = f"Combine these facts into a career advocacy response:\nGraph: {graph_context}\nText: {vector_context}\nQuestion: {prompt}"
-                ans = llm.invoke(final_prompt)
-                st.markdown(extract_clean_text(ans))
-                st.session_state.messages.append({"role": "assistant", "content": extract_clean_text(ans)})
+                # PHASE 3: Synthesis
+                synthesis_prompt = f"""
+                As Freddy's Career Advocate, synthesize an answer using these two sources:
+                1. RELATIONSHIP DATA (GRAPH): {graph_data}
+                2. TEXTUAL CONTEXT (VECTOR): {vector_data}
+                
+                USER QUESTION: {prompt}
+                
+                Provide a professional, formatted response. Focus on Freddy's 23+ years of impact.
+                """
+                
+                with st.spinner("⚖️ Synthesizing Hybrid Answer..."):
+                    final_res = llm.invoke(synthesis_prompt)
+                    answer = extract_clean_text(final_res)
+                    
+                    st.markdown(answer)
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                    
             except Exception as e:
-                st.error(f"Query failed: {e}")
+                st.error(f"Agentic Cycle Failed: {e}")
