@@ -16,3 +16,4 @@ nest-asyncio
 # Vector Database (Milvus/Zilliz)
 langchain-milvus
 pymilvus>=2.4.0
+langchain-neo4j
