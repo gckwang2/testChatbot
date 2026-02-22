@@ -42,13 +42,25 @@ def extract_clean_text(response):
         return str(content)
     return str(response)
 
-def update_usage(response, model_name):
+def update_usage(response, llm_object):
+    """Parses usage_metadata and updates global costs."""
+    # Get model name from the object attribute correctly
+    model_name = getattr(llm_object, "model", "gemini-3-flash-preview")
+    
     if hasattr(response, 'usage_metadata'):
         usage = response.usage_metadata
+        # Gemini 3 usage keys are typically 'input_token_count' and 'output_token_count'
         in_toks = usage.get('input_token_count', 0)
         out_toks = usage.get('output_token_count', 0)
-        rates = PRICING.get(model_name, PRICING["gemini-3-flash-preview"])
+        
+        # Select rates (mapping common names to our pricing dict)
+        if "pro" in model_name.lower():
+            rates = PRICING["gemini-2.5-pro"]
+        else:
+            rates = PRICING["gemini-3-flash-preview"]
+            
         cost = (in_toks / 1_000_000 * rates["input"]) + (out_toks / 1_000_000 * rates["output"])
+        
         st.session_state.total_cost += cost
         st.session_state.total_tokens += (in_toks + out_toks)
 
