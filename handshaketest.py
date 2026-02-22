@@ -43,18 +43,18 @@ def extract_clean_text(response):
     return str(response)
 
 def update_usage(response, llm_object):
-    """Parses usage_metadata and updates global costs."""
-    # Get model name from the object attribute correctly
-    model_name = getattr(llm_object, "model", "gemini-3-flash-preview")
+    """Parses usage_metadata and updates global costs using the 2026 attribute schema."""
+    # LangChain 4.0 uses .model instead of .model_name
+    model_id = getattr(llm_object, "model", "gemini-3-flash-preview")
     
     if hasattr(response, 'usage_metadata'):
         usage = response.usage_metadata
-        # Gemini 3 usage keys are typically 'input_token_count' and 'output_token_count'
-        in_toks = usage.get('input_token_count', 0)
-        out_toks = usage.get('output_token_count', 0)
+        # 2026 standardized keys: input_tokens / output_tokens
+        in_toks = usage.get('input_tokens', usage.get('input_token_count', 0))
+        out_toks = usage.get('output_tokens', usage.get('output_token_count', 0))
         
-        # Select rates (mapping common names to our pricing dict)
-        if "pro" in model_name.lower():
+        # Select rates
+        if "pro" in model_id.lower():
             rates = PRICING["gemini-2.5-pro"]
         else:
             rates = PRICING["gemini-3-flash-preview"]
@@ -157,7 +157,7 @@ if prompt := st.chat_input("Ask about Freddy..."):
                 with st.spinner("⚖️ Synthesizing..."):
                     final_prompt = f"Graph Context: {g_res['result']}\nText Context: {v_context}\nQuestion: {prompt}"
                     ans = llm.invoke(final_prompt)
-                    update_usage(ans, llm.model_name)
+                    update_usage(ans, llm)
                     
                     full_text = extract_clean_text(ans)
                     st.markdown(full_text)
