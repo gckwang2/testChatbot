@@ -136,6 +136,7 @@ with st.sidebar:
         st.session_state.total_tokens = 0
         st.rerun()
     st.divider()
+    model_choice = st.selectbox("Engine:", ["Gemini 3 Flash", "Gemini 2.5 Pro", "Groq Llama 3"])
     v_store, graph, result = init_connections(model_choice)
     llm = result if v_store and graph and not isinstance(result, str) else None
     
