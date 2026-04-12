@@ -136,10 +136,14 @@ with st.sidebar:
         st.session_state.total_tokens = 0
         st.rerun()
     st.divider()
-    model_choice = st.selectbox("Engine:", ["Gemini 3 Flash", "Gemini 2.5 Pro", "Groq Llama 3"])
     v_store, graph, result = init_connections(model_choice)
     llm = result if v_store and graph and not isinstance(result, str) else None
-
+    
+    if not llm:
+        st.error(f"⚠️ **System Malfunction!**")
+        with st.expander("Diagnostic Report", expanded=True):
+            st.code(result if isinstance(result, str) else "Could not initialize LLM, Graph, or Vector Store.", language="text")
+            st.caption(f"Check st.secrets for: `GOOGLE_API_KEY`, `GROQ_API_KEY`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `ZILLIZ_URI`, `ZILLIZ_TOKEN`.")
 # 6. MAIN CHAT LOOP
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
