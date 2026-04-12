@@ -6,6 +6,7 @@ nest_asyncio.apply()  # Fixes Milvus event loop crash
 
 import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_milvus import Milvus 
 from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_core.globals import set_llm_cache
@@ -19,7 +20,8 @@ st.set_page_config(page_title="Freddy's Agentic GraphRAG", layout="wide")
 
 PRICING = {
     "gemini-3-flash-preview": {"input": 0.075, "output": 0.30},
-    "gemini-2.5-pro": {"input": 1.25, "output": 5.00}
+    "gemini-2.5-pro": {"input": 1.25, "output": 5.00},
+    "groq-llama-3.1-70b-versatile": {"input": 0.59, "output": 0.79}
 }
 
 if "total_cost" not in st.session_state: st.session_state.total_cost = 0.0
@@ -31,12 +33,18 @@ if "messages" not in st.session_state:
 def update_usage(response, llm_object):
     """Updates the cost tracker using 2026 attribute standards."""
     model_id = getattr(llm_object, "model", "gemini-3-flash-preview")
-    if hasattr(response, 'usage_metadata'):
+        if hasattr(response, 'usage_metadata'):
         usage = response.usage_metadata
         in_toks = usage.get('input_tokens', usage.get('input_token_count', 0))
         out_toks = usage.get('output_tokens', usage.get('output_token_count', 0))
-        rates = PRICING["gemini-2.5-pro"] if "pro" in model_id.lower() else PRICING["gemini-3-flash-preview"]
+        if "pro" in model_id.lower():
+            rates = PRICING["gemini-2.5-pro"]
+        elif "llama" in model_id.lower():
+            rates = PRICING["groq-llama-3.1-70b-versatile"]
+        else:
+            rates = PRICING["gemini-3-flash-preview"]
         cost = (in_toks / 1_000_000 * rates["input"]) + (out_toks / 1_000_000 * rates["output"])
+
         st.session_state.total_cost += cost
         st.session_state.total_tokens += (in_toks + out_toks)
 
@@ -82,13 +90,26 @@ def init_connections(engine_choice):
     try:
         embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=st.secrets["GOOGLE_API_KEY"])
         
-        # 0.1 Temperature + Disable Thinking Budget to fix the 35s delay
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-3-flash-preview" if "Gemini 3" in engine_choice else "gemini-2.5-pro",
-            google_api_key=st.secrets["GOOGLE_API_KEY"],
-            temperature=0.1,
-            extra_body={"thinking_level": "low"}
-        )
+        if "Gemini 3" in engine_choice:
+            model_name = "gemini-3-flash-preview"
+        elif "Gemini 2.5" in engine_choice:
+            model_name = "gemini-2.5-pro"
+        else:
+            model_name = "groq-llama-3.1-70b-versatile"
+
+        if "Groq" in engine_choice:
+            llm = ChatGroq(
+                model_name=model_name,
+                groq_api_key=st.secrets["GROQ_API_KEY"],
+                temperature=0.1
+            )
+        else:
+            llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=st.secrets["GOOGLE_API_KEY"],
+                temperature=0.1,
+                extra_body={"thinking_level": "low"}
+            )
 
         graph = Neo4jGraph(
             url=st.secrets["NEO4J_URI"], 
@@ -115,7 +136,7 @@ with st.sidebar:
         st.session_state.total_tokens = 0
         st.rerun()
     st.divider()
-    model_choice = st.selectbox("Engine:", ["Gemini 3 Flash", "Gemini 2.5 Pro"])
+    model_choice = st.selectbox("Engine:", ["Gemini 3 Flash", "Gemini 2.5 Pro", "Groq Llama 3"])
     v_store, graph, result = init_connections(model_choice)
     llm = result if v_store and graph and not isinstance(result, str) else None
 
