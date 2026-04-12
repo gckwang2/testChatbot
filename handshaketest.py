@@ -8,7 +8,7 @@ import streamlit as st
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_milvus import Milvus 
-from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
+# from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_core.globals import set_llm_cache
 from langchain_core.caches import InMemoryCache
 
@@ -69,20 +69,21 @@ def extract_clean_text(response):
     return str(response)
 
 async def run_parallel_queries(prompt, llm, graph, v_store):
-    """Executes Graph and Vector searches simultaneously to reduce latency."""
-    graph_chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
+    """Executes Vector search."""
+    # graph_chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
     
     t_start = time.time()
     # Task 1: Neo4j Cypher Execution
-    task1 = asyncio.to_thread(graph_chain.invoke, {"query": prompt})
+    # task1 = asyncio.to_thread(graph_chain.invoke, {"query": prompt})
     # Task 2: Milvus Vector Search
     task2 = asyncio.to_thread(v_store.similarity_search, prompt, k=3)
 
-    g_res, v_docs = await asyncio.gather(task1, task2)
+    v_docs = await asyncio.gather(task2)
+    # g_res, v_docs = await asyncio.gather(task1, task2)
     
     elapsed = time.time() - t_start
     v_context = "\n".join([d.page_content for d in v_docs])
-    return g_res.get("result"), v_context, elapsed
+    return None, v_context, elapsed
 
 # 4. CONNECTION LOGIC
 @st.cache_resource
@@ -111,19 +112,19 @@ def init_connections(engine_choice):
                 extra_body={"thinking_level": "low"}
             )
 
-        graph = Neo4jGraph(
-            url=st.secrets["NEO4J_URI"], 
-            username=st.secrets["NEO4J_USERNAME"], 
-            password=st.secrets["NEO4J_PASSWORD"], 
-            database="73fe4e5f"
-        )
+#        graph = Neo4jGraph(
+#            url=st.secrets["NEO4J_URI"], 
+#            username=st.secrets["NEO4J_USERNAME"], 
+#            password=st.secrets["NEO4J_PASSWORD"], 
+#            database="73fe4e5f"
+#        )
         
         v_store = Milvus(
             embedding_function=embeddings, 
             collection_name="RESUME_SEARCH", 
             connection_args={"uri": st.secrets["ZILLIZ_URI"], "token": st.secrets["ZILLIZ_TOKEN"], "secure": True}
         )
-        return v_store, graph, llm
+        return v_store, None, llm
     except Exception as e: return None, None, str(e)
 
 # 5. SIDEBAR
@@ -143,8 +144,8 @@ with st.sidebar:
     if not llm:
         st.error(f"⚠️ **System Malfunction!**")
         with st.expander("Diagnostic Report", expanded=True):
-            st.code(result if isinstance(result, str) else "Could not initialize LLM, Graph, or Vector Store.", language="text")
-            st.caption(f"Check st.secrets for: `GOOGLE_API_KEY`, `GROQ_API_KEY`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `ZILLIZ_URI`, `ZILLIZ_TOKEN`.")
+            st.code(result if isinstance(result, str) else "Could not initialize LLM or Vector Store.", language="text")
+            st.caption(f"Check st.secrets for: `GOOGLE_API_KEY`, `GROQ_API_KEY`, `ZILLIZ_URI`, `ZILLIZ_TOKEN`.")
 # 6. MAIN CHAT LOOP
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
@@ -158,16 +159,16 @@ if prompt := st.chat_input("Ask about Freddy..."):
             st.error("System Offline. Check sidebar.")
         else:
             try:
-                # STEP 1 & 2: Parallel Retrieval
-                with st.spinner("🚀 Parallel Graph + Vector Search..."):
-                    g_context, v_context, retrieval_time = asyncio.run(
+                # Retrieval
+                with st.spinner("🚀 Parallel Vector Search..."):
+                    _, v_context, retrieval_time = asyncio.run(
                         run_parallel_queries(prompt, llm, graph, v_store)
                     )
 
-                # STEP 3: Final Synthesis
+                # Synthesis
                 with st.spinner("⚖️ Final Synthesis..."):
                     t_syn_start = time.time()
-                    final_prompt = f"Graph Context: {g_context}\nText Context: {v_context}\nQuestion: {prompt}"
+                    final_prompt = f"Text Context: {v_context}\nQuestion: {prompt}"
                     ans = llm.invoke(final_prompt)
                     update_usage(ans, llm)
                     synthesis_time = time.time() - t_syn_start
