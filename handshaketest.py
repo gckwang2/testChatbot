@@ -5,10 +5,12 @@ from datetime import datetime
 nest_asyncio.apply()  # Fixes Milvus event loop crash
 
 import streamlit as st
+import requests
+import json
 from pymilvus import connections
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
-from langchain_milvus import Milvus 
+# from langchain_milvus import Milvus 
 # from langchain_neo4j import Neo4jGraph, GraphCypherQAChain
 from langchain_core.globals import set_llm_cache
 from langchain_core.caches import InMemoryCache
@@ -69,28 +71,50 @@ def extract_clean_text(response):
     # 3. Fallback for raw strings
     return str(response)
 
-def run_milvus_query(prompt, v_store):
-    """Executes Vector search with automatic connection checking."""
+def run_milvus_query(prompt, v_store, embeddings_model):
+    """Executes Vector search using Zilliz REST API."""
     t_start = time.time()
     
-    # Check if a connection exists; if not, recreate it
-    if not connections.has_connection("default"):
-        try:
-            # Recreate connection using connection_args stored in v_store
-            connections.connect(**v_store._connection_args)
-        except Exception as e:
-            # If reconnection fails, raise a descriptive error
-            raise ConnectionError(f"Failed to reconnect to Milvus: {e}") from e
-
-    # Execute search
-    try:
-        v_docs = v_store.similarity_search(prompt, k=3)
-    except Exception as e:
-        # Catch unexpected search errors for clearer reporting
-        raise RuntimeError(f"Milvus search failed: {e}") from e
+    # PHASE 1: Execution (REST API Search)
+    accumulated_context = []
     
+    try:
+        # Prepare REST details
+        # Remove https:// and :443 from URI if they exist for clean formatting
+        base_uri = st.secrets["ZILLIZ_URI"].replace("https://", "").replace(":443", "")
+        search_url = f"https://{base_uri}/v1/vector/search"
+        headers = {
+            "Authorization": f"Bearer {st.secrets['ZILLIZ_TOKEN']}",
+            "Content-Type": "application/json"
+        }
+
+        # Generate vector
+        query_vector = embeddings_model.embed_query(prompt)
+        
+        # REST Payload
+        payload = {
+            "collectionName": "RESUME_SEARCH",
+            "vector": query_vector,
+            "limit": 10,
+            "outputFields": ["text"]
+        }
+        
+        # Execute HTTP POST
+        response = requests.post(search_url, headers=headers, json=payload, timeout=25)
+        
+        if response.status_code == 200:
+            results = response.json().get("data", [])
+            for hit in results:
+                accumulated_context.append(hit.get("text", ""))
+        else:
+            raise ConnectionError(f"Search Failed: {response.text}")
+
+    except Exception as e:
+        raise RuntimeError(f"REST Search Error: {e}") from e
+
     elapsed = time.time() - t_start
-    v_context = "\n".join([d.page_content for d in v_docs])
+    # PHASE 2: Context Preparation
+    v_context = "\n\n".join(list(set(accumulated_context)))
     return None, v_context, elapsed
 
 # 4. CONNECTION LOGIC
@@ -120,20 +144,8 @@ def init_connections(engine_choice):
                 extra_body={"thinking_level": "low"}
             )
 
-#        graph = Neo4jGraph(
-#            url=st.secrets["NEO4J_URI"], 
-#            username=st.secrets["NEO4J_USERNAME"], 
-#            password=st.secrets["NEO4J_PASSWORD"], 
-#            database="73fe4e5f"
-#        )
-        
-        v_store = Milvus(
-            embedding_function=embeddings, 
-            collection_name="RESUME_SEARCH", 
-            connection_args={"uri": st.secrets["ZILLIZ_URI"], "token": st.secrets["ZILLIZ_TOKEN"], "secure": True}
-        )
-        return v_store, None, llm
-    except Exception as e: return None, None, str(e)
+        return None, None, llm, embeddings
+    except Exception as e: return None, None, str(e), None
 
 # 5. SIDEBAR
 with st.sidebar:
@@ -146,13 +158,20 @@ with st.sidebar:
         st.rerun()
     st.divider()
     model_choice = st.selectbox("Engine:", ["Gemini 3 Flash", "Gemini 2.5 Pro", "Groq Llama 3"])
-    v_store, graph, result = init_connections(model_choice)
-    llm = result if v_store and graph and not isinstance(result, str) else None
+    result1, result2, result3, result4 = init_connections(model_choice)
+    llm = result3 if not isinstance(result3, str) else None
+    embeddings_model = result4 if not isinstance(result4, str) else None
     
-    if not llm:
+    if not llm or not embeddings_model:
         st.error(f"⚠️ **System Malfunction!**")
         with st.expander("Diagnostic Report", expanded=True):
-            st.code(result if isinstance(result, str) else "Could not initialize LLM or Vector Store.", language="text")
+            error_message = ""
+            if isinstance(result3, str):
+                error_message += f"LLM Initialization Error: {result3}\n"
+            if isinstance(result4, str):
+                 error_message += f"Embeddings Initialization Error: {result4}\n"
+
+            st.code(error_message if error_message else "Could not initialize LLM or Embeddings Model.", language="text")
             st.caption(f"Check st.secrets for: `GOOGLE_API_KEY`, `GROQ_API_KEY`, `ZILLIZ_URI`, `ZILLIZ_TOKEN`.")
 # 6. MAIN CHAT LOOP
 for msg in st.session_state.messages:
@@ -167,9 +186,11 @@ if prompt := st.chat_input("Ask about Freddy..."):
             st.error("System Offline. Check sidebar.")
         else:
             try:
-                # Retrieval
-                with st.spinner("🚀 Milvus Vector Search..."):
-                    _, v_context, retrieval_time = run_milvus_query(prompt, v_store)
+                # Retrieval spinners from working code
+                search_topics = [prompt] # Use original prompt for simplicity
+                for topic in search_topics:
+                    with st.spinner(f"Consulting Freddy's career history..."):
+                         _, v_context, retrieval_time = run_milvus_query(topic, None, embeddings_model)
 
                 # Synthesis
                 with st.spinner("⚖️ Final Synthesis..."):
