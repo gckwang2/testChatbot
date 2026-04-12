@@ -33,7 +33,7 @@ if "messages" not in st.session_state:
 def update_usage(response, llm_object):
     """Updates the cost tracker using 2026 attribute standards."""
     model_id = getattr(llm_object, "model", "gemini-3-flash-preview")
-        if hasattr(response, 'usage_metadata'):
+    if hasattr(response, 'usage_metadata'):
         usage = response.usage_metadata
         in_toks = usage.get('input_tokens', usage.get('input_token_count', 0))
         out_toks = usage.get('output_tokens', usage.get('output_token_count', 0))
