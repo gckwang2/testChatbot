@@ -68,7 +68,7 @@ def extract_clean_text(response):
     # 3. Fallback for raw strings
     return str(response)
 
-async def run_parallel_queries(prompt, llm, graph, v_store):
+def run_milvus_query(prompt, v_store):
     """Executes Vector search."""
     # graph_chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
     
@@ -76,9 +76,9 @@ async def run_parallel_queries(prompt, llm, graph, v_store):
     # Task 1: Neo4j Cypher Execution
     # task1 = asyncio.to_thread(graph_chain.invoke, {"query": prompt})
     # Task 2: Milvus Vector Search
-    task2 = asyncio.to_thread(v_store.similarity_search, prompt, k=3)
+    v_docs = v_store.similarity_search(prompt, k=3)
 
-    v_docs = await asyncio.gather(task2)
+    # v_docs = await asyncio.gather(task2)
     # g_res, v_docs = await asyncio.gather(task1, task2)
     
     elapsed = time.time() - t_start
@@ -160,10 +160,8 @@ if prompt := st.chat_input("Ask about Freddy..."):
         else:
             try:
                 # Retrieval
-                with st.spinner("🚀 Parallel Vector Search..."):
-                    _, v_context, retrieval_time = asyncio.run(
-                        run_parallel_queries(prompt, llm, graph, v_store)
-                    )
+                with st.spinner("🚀 Milvus Vector Search..."):
+                    _, v_context, retrieval_time = run_milvus_query(prompt, v_store)
 
                 # Synthesis
                 with st.spinner("⚖️ Final Synthesis..."):
