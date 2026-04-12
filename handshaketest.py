@@ -5,6 +5,7 @@ from datetime import datetime
 nest_asyncio.apply()  # Fixes Milvus event loop crash
 
 import streamlit as st
+from pymilvus import connections
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_milvus import Milvus 
@@ -69,17 +70,24 @@ def extract_clean_text(response):
     return str(response)
 
 def run_milvus_query(prompt, v_store):
-    """Executes Vector search."""
-    # graph_chain = GraphCypherQAChain.from_llm(llm, graph=graph, allow_dangerous_requests=True)
-    
+    """Executes Vector search with automatic connection checking."""
     t_start = time.time()
-    # Task 1: Neo4j Cypher Execution
-    # task1 = asyncio.to_thread(graph_chain.invoke, {"query": prompt})
-    # Task 2: Milvus Vector Search
-    v_docs = v_store.similarity_search(prompt, k=3)
+    
+    # Check if a connection exists; if not, recreate it
+    if not connections.has_connection("default"):
+        try:
+            # Recreate connection using connection_args stored in v_store
+            connections.connect(**v_store._connection_args)
+        except Exception as e:
+            # If reconnection fails, raise a descriptive error
+            raise ConnectionError(f"Failed to reconnect to Milvus: {e}") from e
 
-    # v_docs = await asyncio.gather(task2)
-    # g_res, v_docs = await asyncio.gather(task1, task2)
+    # Execute search
+    try:
+        v_docs = v_store.similarity_search(prompt, k=3)
+    except Exception as e:
+        # Catch unexpected search errors for clearer reporting
+        raise RuntimeError(f"Milvus search failed: {e}") from e
     
     elapsed = time.time() - t_start
     v_context = "\n".join([d.page_content for d in v_docs])
