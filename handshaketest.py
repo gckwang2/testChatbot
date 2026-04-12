@@ -24,7 +24,7 @@ st.set_page_config(page_title="Freddy's Agentic GraphRAG", layout="wide")
 PRICING = {
     "gemini-3-flash-preview": {"input": 0.075, "output": 0.30},
     "gemini-2.5-pro": {"input": 1.25, "output": 5.00},
-    "groq-llama-3.1-70b-versatile": {"input": 0.59, "output": 0.79}
+    "llama-3.1-70b-versatile": {"input": 0.59, "output": 0.79}
 }
 
 if "total_cost" not in st.session_state: st.session_state.total_cost = 0.0
@@ -43,7 +43,7 @@ def update_usage(response, llm_object):
         if "pro" in model_id.lower():
             rates = PRICING["gemini-2.5-pro"]
         elif "llama" in model_id.lower():
-            rates = PRICING["groq-llama-3.1-70b-versatile"]
+            rates = PRICING["llama-3.1-70b-versatile"]
         else:
             rates = PRICING["gemini-3-flash-preview"]
         cost = (in_toks / 1_000_000 * rates["input"]) + (out_toks / 1_000_000 * rates["output"])
@@ -128,7 +128,7 @@ def init_connections(engine_choice):
         elif "Gemini 2.5" in engine_choice:
             model_name = "gemini-2.5-pro"
         else:
-            model_name = "groq-llama-3.1-70b-versatile"
+            model_name = "llama-3.1-70b-versatile"
 
         if "Groq" in engine_choice:
             llm = ChatGroq(
